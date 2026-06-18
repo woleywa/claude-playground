@@ -80,12 +80,18 @@ function renderGrid() {
       const color = cellColor(state.grid[r][c]);
       if (color) cell.style.backgroundColor = color;
 
-      // Show cat for revealed rows only
-      if (state.solution !== null && r < state.revealed && state.solution[r] === c) {
-        cell.classList.add('cat');
-        const span = document.createElement('span');
-        span.textContent = '🐱';
-        cell.appendChild(span);
+      if (state.solution !== null && r < state.revealed) {
+        if (state.solution[r] === c) {
+          cell.classList.add('cat');
+          const span = document.createElement('span');
+          span.textContent = '🐱';
+          cell.appendChild(span);
+        } else {
+          cell.classList.add('excluded');
+          const span = document.createElement('span');
+          span.textContent = '✕';
+          cell.appendChild(span);
+        }
       }
 
       gridEl.appendChild(cell);
