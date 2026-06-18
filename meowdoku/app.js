@@ -163,27 +163,18 @@ function bindEvents() {
   document.getElementById('hint-btn').addEventListener('click', runHint);
 
   document.getElementById('photo-btn').addEventListener('click', () => {
-    openImagePicker(state.size, (result) => {
-      state.grid = result.grid;
-      state.customColors = result.colors;
-      state.solution = null;
-      state.revealed = 0;
-      clearHint();
+    openImagePicker(state.size, handleImageResult);
+  });
 
-      // Auto-adjust size if color count differs from current size
-      if (result.colorCount !== state.size) {
-        const detected = Math.min(12, Math.max(5, result.colorCount));
-        // Only warn — don't silently resize since grid dimensions were set by user
-        const statusEl = document.getElementById('status');
-        if (result.colorCount !== state.size) {
-          statusEl.textContent = `Detected ${result.colorCount} colors — grid is ${state.size}×${state.size}. Adjust size if needed.`;
-          statusEl.className = 'status warn';
-        }
-      }
+  document.getElementById('paste-btn').addEventListener('click', () => {
+    openImageFromClipboard(state.size, handleImageResult);
+  });
 
-      renderPalette();
-      renderGrid();
-    });
+  document.addEventListener('paste', (e) => {
+    const item = Array.from(e.clipboardData?.items ?? []).find(it => it.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    loadImageBlob(item.getAsFile(), state.size, handleImageResult);
   });
 
   // Mouse painting
@@ -324,6 +315,23 @@ function generateHintText(step) {
   if (deadEnd.length)    lines.push(`✗ No valid continuation: ${deadEnd.join(', ')}`);
 
   return lines.join('\n');
+}
+
+// ── Image import ───────────────────────────────────────────────────────────
+
+function handleImageResult(result) {
+  state.grid = result.grid;
+  state.customColors = result.colors;
+  state.solution = null;
+  state.revealed = 0;
+  clearHint();
+  if (result.colorCount !== state.size) {
+    const el = document.getElementById('status');
+    el.textContent = `Detected ${result.colorCount} colors — grid is ${state.size}×${state.size}. Adjust size if needed.`;
+    el.className = 'status warn';
+  }
+  renderPalette();
+  renderGrid();
 }
 
 // ── Solver integration ─────────────────────────────────────────────────────

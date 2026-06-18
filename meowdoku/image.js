@@ -13,23 +13,41 @@ const _img = {
 function openImagePicker(size, onResult) {
   _img.size = size;
   _img.onResult = onResult;
+  _openFilePicker();
+}
+
+function openImageFromClipboard(size, onResult) {
+  _img.size = size;
+  _img.onResult = onResult;
+  if (!navigator.clipboard?.read) { _openFilePicker(); return; }
+  navigator.clipboard.read().then(items => {
+    for (const item of items) {
+      const type = item.types.find(t => t.startsWith('image/'));
+      if (type) { item.getType(type).then(_loadBlob); return; }
+    }
+    _openFilePicker();
+  }).catch(() => _openFilePicker());
+}
+
+function loadImageBlob(blob, size, onResult) {
+  _img.size = size;
+  _img.onResult = onResult;
+  _loadBlob(blob);
+}
+
+function _openFilePicker() {
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
-  input.addEventListener('change', (e) => {
-    if (e.target.files[0]) _loadFile(e.target.files[0]);
-  });
+  input.addEventListener('change', (e) => { if (e.target.files[0]) _loadBlob(e.target.files[0]); });
   input.click();
 }
 
-function _loadFile(file) {
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = new Image();
-    img.onload = () => _showModal(img);
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
+function _loadBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => { URL.revokeObjectURL(url); _showModal(img); };
+  img.src = url;
 }
 
 function _showModal(img) {
