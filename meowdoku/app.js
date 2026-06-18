@@ -331,9 +331,9 @@ function handleImageResult(result) {
   state.solution = null;
   state.revealed = 0;
   clearHint();
-  if (result.colorCount !== state.size) {
+  if (result.colorCount < state.size) {
     const el = document.getElementById('status');
-    el.textContent = `Detected ${result.colorCount} colors — grid is ${state.size}×${state.size}. Adjust size if needed.`;
+    el.textContent = `Only ${result.colorCount} colors detected — is the grid really ${state.size}×${state.size}?`;
     el.className = 'status warn';
   }
   renderPalette();

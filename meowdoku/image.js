@@ -284,7 +284,7 @@ function _extractGrid(img, bounds, size) {
     })
   );
 
-  return _cluster(raw);
+  return _cluster(raw, size);
 }
 
 function _medRGB(pts) {
@@ -300,7 +300,30 @@ function _dist(a, b) {
   return Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2);
 }
 
-function _cluster(raw) {
+function _mergePair(clusters, i, j) {
+  const ci = clusters[i], cj = clusters[j], n = ci.n + cj.n;
+  clusters[i] = {
+    rgb: [
+      Math.round((ci.rgb[0]*ci.n + cj.rgb[0]*cj.n) / n),
+      Math.round((ci.rgb[1]*ci.n + cj.rgb[1]*cj.n) / n),
+      Math.round((ci.rgb[2]*ci.n + cj.rgb[2]*cj.n) / n),
+    ],
+    n,
+  };
+  clusters.splice(j, 1);
+}
+
+function _closestPair(clusters) {
+  let minD = Infinity, mi = -1, mj = -1;
+  for (let i = 0; i < clusters.length; i++)
+    for (let j = i + 1; j < clusters.length; j++) {
+      const d = _dist(clusters[i].rgb, clusters[j].rgb);
+      if (d < minD) { minD = d; mi = i; mj = j; }
+    }
+  return { minD, mi, mj };
+}
+
+function _cluster(raw, size) {
   const flat = raw.flat();
   const clusters = []; // { rgb:[r,g,b], n:count }
   const THRESH = 60;
@@ -321,30 +344,14 @@ function _cluster(raw) {
     }
   }
 
-  // Post-merge: collapse clusters that are still too similar (sampling noise)
-  let merging = true;
-  while (merging) {
-    merging = false;
-    let minD = Infinity, mi = -1, mj = -1;
-    for (let i = 0; i < clusters.length; i++)
-      for (let j = i + 1; j < clusters.length; j++) {
-        const d = _dist(clusters[i].rgb, clusters[j].rgb);
-        if (d < minD) { minD = d; mi = i; mj = j; }
-      }
-    if (minD < 40) {
-      const ci = clusters[mi], cj = clusters[mj];
-      const n = ci.n + cj.n;
-      clusters[mi] = {
-        rgb: [
-          Math.round((ci.rgb[0] * ci.n + cj.rgb[0] * cj.n) / n),
-          Math.round((ci.rgb[1] * ci.n + cj.rgb[1] * cj.n) / n),
-          Math.round((ci.rgb[2] * ci.n + cj.rgb[2] * cj.n) / n),
-        ],
-        n,
-      };
-      clusters.splice(mj, 1);
-      merging = true;
-    }
+  // Merge obvious noise first (very similar clusters)
+  let p = _closestPair(clusters);
+  while (p.minD < 40) { _mergePair(clusters, p.mi, p.mj); p = _closestPair(clusters); }
+
+  // Force down to exactly `size` clusters — puzzle always has exactly N colors
+  while (clusters.length > size) {
+    const { mi, mj } = _closestPair(clusters);
+    _mergePair(clusters, mi, mj);
   }
 
   // Map each cell to nearest cluster index
