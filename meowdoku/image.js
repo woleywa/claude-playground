@@ -289,7 +289,11 @@ function _extractGrid(img, bounds, size) {
 
 function _medRGB(pts) {
   const med = arr => { const s = [...arr].sort((a,b)=>a-b), m = s.length>>1; return s.length%2 ? s[m] : (s[m-1]+s[m])>>1; };
-  return [med(pts.map(p=>p[0])), med(pts.map(p=>p[1])), med(pts.map(p=>p[2]))];
+  // Strip near-white pixels (X-mark overlay) before computing median.
+  // Fall back to all points only if too few colored pixels remain.
+  const colored = pts.filter(([r,g,b]) => !(r > 210 && g > 210 && b > 210));
+  const use = colored.length >= Math.ceil(pts.length * 0.3) ? colored : pts;
+  return [med(use.map(p=>p[0])), med(use.map(p=>p[1])), med(use.map(p=>p[2]))];
 }
 
 function _dist(a, b) {
