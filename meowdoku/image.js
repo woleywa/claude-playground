@@ -251,15 +251,17 @@ function _extractGrid(img, bounds, size) {
   const { x, y, w, h } = bounds;
   const cw = w / size, ch = h / size;
 
-  // Sample 4 off-center points per cell (22%/78%) to avoid X-mark and cat-face centres
+  // Sample a 5×5 grid per cell and take the median — robust against X-mark overlays
   const raw = Array.from({ length: size }, (_, row) =>
     Array.from({ length: size }, (_, col) => {
-      const pts = [[0.22, 0.22], [0.78, 0.22], [0.22, 0.78], [0.78, 0.78]].map(([fc, fr]) => {
-        const px = Math.min(canvas.width - 1, Math.floor(x + (col + fc) * cw));
-        const py = Math.min(canvas.height - 1, Math.floor(y + (row + fr) * ch));
-        const i = (py * iw + px) * 4;
-        return [data[i], data[i+1], data[i+2]];
-      });
+      const pts = [];
+      for (let fr = 0.1; fr <= 0.91; fr += 0.2)
+        for (let fc = 0.1; fc <= 0.91; fc += 0.2) {
+          const px = Math.min(canvas.width - 1, Math.floor(x + (col + fc) * cw));
+          const py = Math.min(canvas.height - 1, Math.floor(y + (row + fr) * ch));
+          const i = (py * iw + px) * 4;
+          pts.push([data[i], data[i+1], data[i+2]]);
+        }
       return _medRGB(pts);
     })
   );
@@ -279,7 +281,7 @@ function _dist(a, b) {
 function _cluster(raw) {
   const flat = raw.flat();
   const clusters = []; // { rgb:[r,g,b], n:count }
-  const THRESH = 50;
+  const THRESH = 60;
 
   for (const rgb of flat) {
     let best = -1, bestD = Infinity;
@@ -294,6 +296,32 @@ function _cluster(raw) {
       c.n++;
     } else {
       clusters.push({ rgb, n: 1 });
+    }
+  }
+
+  // Post-merge: collapse clusters that are still too similar (sampling noise)
+  let merging = true;
+  while (merging) {
+    merging = false;
+    let minD = Infinity, mi = -1, mj = -1;
+    for (let i = 0; i < clusters.length; i++)
+      for (let j = i + 1; j < clusters.length; j++) {
+        const d = _dist(clusters[i].rgb, clusters[j].rgb);
+        if (d < minD) { minD = d; mi = i; mj = j; }
+      }
+    if (minD < 40) {
+      const ci = clusters[mi], cj = clusters[mj];
+      const n = ci.n + cj.n;
+      clusters[mi] = {
+        rgb: [
+          Math.round((ci.rgb[0] * ci.n + cj.rgb[0] * cj.n) / n),
+          Math.round((ci.rgb[1] * ci.n + cj.rgb[1] * cj.n) / n),
+          Math.round((ci.rgb[2] * ci.n + cj.rgb[2] * cj.n) / n),
+        ],
+        n,
+      };
+      clusters.splice(mj, 1);
+      merging = true;
     }
   }
 

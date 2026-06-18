@@ -37,6 +37,10 @@ Constraints enforced: 1 cat per row, 1 per column, 1 per color region, no two ca
 
 See `docs/decisions.md`.
 
+## Git workflow
+
+Push directly to `main` — no feature branches. Project is too small for branch overhead.
+
 ## End-of-session checklist
 
 When user says "prepare for clear", "wrap up", or "all mds updated":
