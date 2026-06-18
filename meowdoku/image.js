@@ -166,9 +166,13 @@ function _showModal(img) {
 
   if (detected) {
     _img.bounds = detected;
+    // Reflect the detected grid size in the preview overlay
+    const scaled = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    const n = _detectGridSize(scaled, canvas.width, canvas.height, detected);
+    if (n) _img.size = n;
     _img.mode = 'preview';
     _drawOverlay(ctx, detected);
-    _setStatus('Grid detected — does this look right?');
+    _setStatus(n ? `${n}×${n} grid detected — does this look right?` : 'Grid detected — does this look right?');
     document.getElementById('img-confirm').style.display = '';
     document.getElementById('img-adjust').textContent = 'Adjust';
   } else {
@@ -354,6 +358,47 @@ function _isColorful(r, g, b) {
   return sat > 0.18 && lig > 0.25 && lig < 0.88;
 }
 
+// ── Grid-size detection (count tile bands via the gaps between tiles) ───────
+
+function _detectGridSize(data, iw, ih, b) {
+  const colorfulAt = (px, py) => {
+    if (px < 0 || py < 0 || px >= iw || py >= ih) return false;
+    const i = (py * iw + px) * 4;
+    return _isColorful(data[i], data[i + 1], data[i + 2]);
+  };
+  const x = Math.round(b.x), y = Math.round(b.y);
+  const w = Math.round(b.w), h = Math.round(b.h);
+  const stepIn = Math.max(1, Math.round(Math.min(w, h) / 350));
+
+  const colFrac = (cx) => {
+    let cnt = 0, tot = 0;
+    for (let cy = y; cy < y + h; cy += stepIn) { tot++; if (colorfulAt(cx, cy)) cnt++; }
+    return tot ? cnt / tot : 0;
+  };
+  const rowFrac = (cy) => {
+    let cnt = 0, tot = 0;
+    for (let cx = x; cx < x + w; cx += stepIn) { tot++; if (colorfulAt(cx, cy)) cnt++; }
+    return tot ? cnt / tot : 0;
+  };
+
+  // Count runs of "tile" (fraction ≥ 0.4) separated by gaps (cream background)
+  const bands = (frac, lo, len) => {
+    const stepOut = Math.max(1, Math.round(len / 500));
+    let count = 0, inside = false;
+    for (let p = lo; p < lo + len; p += stepOut) {
+      const v = frac(p);
+      if (v >= 0.4 && !inside) { count++; inside = true; }
+      else if (v < 0.4) inside = false;
+    }
+    return count;
+  };
+
+  const cols = bands(colFrac, x, w);
+  const rows = bands(rowFrac, y, h);
+  if (cols === rows && cols >= 5 && cols <= 12) return cols;
+  return null;
+}
+
 // ── Color sampling + clustering ────────────────────────────────────────────
 
 function _extractGrid(img, bounds, size) {
@@ -365,12 +410,15 @@ function _extractGrid(img, bounds, size) {
   const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const iw = canvas.width;
 
+  // Derive N from the image (tile gaps); fall back to the slider size
+  const n = _detectGridSize(data, canvas.width, canvas.height, bounds) || size;
+
   const { x, y, w, h } = bounds;
-  const cw = w / size, ch = h / size;
+  const cw = w / n, ch = h / n;
 
   // Sample a 5×5 grid per cell and take the median — robust against X-mark overlays
-  const raw = Array.from({ length: size }, (_, row) =>
-    Array.from({ length: size }, (_, col) => {
+  const raw = Array.from({ length: n }, (_, row) =>
+    Array.from({ length: n }, (_, col) => {
       const pts = [];
       for (let fr = 0.1; fr <= 0.91; fr += 0.2)
         for (let fc = 0.1; fc <= 0.91; fc += 0.2) {
@@ -383,7 +431,7 @@ function _extractGrid(img, bounds, size) {
     })
   );
 
-  return _cluster(raw, size);
+  return _cluster(raw, n);
 }
 
 function _medRGB(pts) {
