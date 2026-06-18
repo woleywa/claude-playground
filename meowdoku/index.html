@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Meowdoku Solver</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>Meowdoku <span>Solver</span></h1>
+    </header>
+
+    <div class="top-controls">
+      <div class="size-control">
+        <span class="size-label" id="size-label">10 × 10</span>
+        <input type="range" id="size-slider" min="5" max="12" value="10" step="1">
+      </div>
+      <div class="action-buttons">
+        <button id="photo-btn" class="btn btn-secondary" title="Load from screenshot">📷</button>
+        <button id="clear-btn" class="btn btn-secondary">Clear</button>
+        <button id="hint-btn" class="btn btn-hint">Hint</button>
+        <button id="solve-btn" class="btn btn-primary">Solve 🐱</button>
+      </div>
+    </div>
+
+    <div class="palette-container">
+      <div class="palette" id="palette"></div>
+    </div>
+
+    <div class="grid-wrapper">
+      <div class="grid" id="grid"></div>
+    </div>
+
+    <div class="hint-box" id="hint-box"></div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <!-- Screenshot modal -->
+  <div class="img-modal" id="img-modal">
+    <div class="img-modal-content">
+      <canvas id="img-canvas"></canvas>
+      <p class="img-modal-status" id="img-status">Detecting grid…</p>
+      <div class="img-modal-actions">
+        <button id="img-close" class="btn btn-secondary">Cancel</button>
+        <button id="img-adjust" class="btn btn-secondary">Adjust</button>
+        <button id="img-confirm" class="btn btn-primary">Use this ✓</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="solver.js"></script>
+  <script src="image.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
