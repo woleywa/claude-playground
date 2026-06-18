@@ -35,6 +35,99 @@ function loadImageBlob(blob, size, onResult) {
   _loadBlob(blob);
 }
 
+// ── AI detection (Gemini) ──────────────────────────────────────────────────
+
+function hasLastImage() {
+  return !!_img.img;
+}
+
+function _getGeminiKey() {
+  let k = localStorage.getItem('gemini_api_key');
+  if (!k) {
+    k = window.prompt('Gemini API-Key eingeben (wird nur in diesem Browser gespeichert):');
+    if (k) { k = k.trim(); localStorage.setItem('gemini_api_key', k); }
+  }
+  return (k && k.trim()) || null;
+}
+
+function _sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+async function detectWithGemini(size, onResult, onStatus) {
+  if (!_img.img) { onStatus && onStatus('Erst ein Bild importieren (📷 / 📋)'); return; }
+  const key = _getGeminiKey();
+  if (!key) { onStatus && onStatus('Kein API-Key eingegeben'); return; }
+
+  onStatus && onStatus('🤖 KI analysiert das Bild…');
+
+  // Downscale to keep payload + cost small while staying legible
+  const img = _img.img;
+  const scale = Math.min(760 / img.naturalWidth, 760 / img.naturalHeight, 1);
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.naturalWidth * scale);
+  c.height = Math.round(img.naturalHeight * scale);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  const b64 = c.toDataURL('image/jpeg', 0.85).split(',')[1];
+
+  const prompt =
+    'This is a screenshot of a Queens/Meowdoku puzzle: a square N×N grid where ' +
+    'each cell belongs to one colored region. Some cells have an X mark or a cat ' +
+    'icon drawn on top — IGNORE those overlays and report the underlying region ' +
+    'color only. There are exactly N distinct region colors (N = grid dimension). ' +
+    'Treat visually similar but clearly different shades as separate regions; do ' +
+    'NOT merge two different regions, and do NOT split one region into two. ' +
+    'Assign each region an integer id starting at 0. Output STRICT JSON only:\n' +
+    '{"size": N, "colors": ["#rrggbb", ...], "grid": [[id,...] x N rows]}\n' +
+    'colors[i] = representative hex for region id i. grid has exactly N rows, each ' +
+    'with exactly N integer ids.';
+
+  const body = {
+    contents: [{ parts: [
+      { text: prompt },
+      { inline_data: { mime_type: 'image/jpeg', data: b64 } },
+    ] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0 },
+  };
+
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
+    'gemini-flash-latest:generateContent?key=' + encodeURIComponent(key);
+
+  let data = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (r.status === 500 || r.status === 503 || r.status === 429) {
+        onStatus && onStatus(`🤖 Modell ausgelastet, neuer Versuch… (${attempt + 1}/4)`);
+        await _sleep(2000 * (attempt + 1));
+        continue;
+      }
+      if (!r.ok) {
+        if (r.status === 400 || r.status === 403) localStorage.removeItem('gemini_api_key');
+        onStatus && onStatus(`🤖 Fehler ${r.status}` + (r.status === 403 ? ' — Key ungültig?' : ''));
+        return;
+      }
+      data = await r.json();
+      break;
+    } catch (e) {
+      onStatus && onStatus('🤖 Netzwerkfehler, neuer Versuch…');
+      await _sleep(2000 * (attempt + 1));
+    }
+  }
+  if (!data) { onStatus && onStatus('🤖 KI nicht erreichbar — später nochmal'); return; }
+
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (e) { onStatus && onStatus('🤖 Antwort unlesbar'); return; }
+  if (!Array.isArray(parsed.grid) || !Array.isArray(parsed.colors)) {
+    onStatus && onStatus('🤖 Unerwartetes Format'); return;
+  }
+
+  onResult({ grid: parsed.grid, colors: parsed.colors, colorCount: parsed.colors.length });
+}
+
 function _openFilePicker() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -234,14 +327,20 @@ function _autoDetect(ctx, w, h) {
   const bw = maxX - minX, bh = maxY - minY;
   if (bw < 40 || bh < 40) return null;
   const ratio = bw / bh;
-  if (ratio < 0.72 || ratio > 1.39) return null;
+  if (ratio < 0.6 || ratio > 1.7) return null;
+
+  // The puzzle grid is always square. Action buttons below the grid (Apply,
+  // pencil, lightbulb) get included as colorful pixels and inflate the box
+  // height. Clamp to the shorter side, anchored at the top-left corner, which
+  // is clean (header/counter are above the scan region).
+  const side = Math.min(bw, bh);
 
   const pad = 2;
   return {
     x: Math.max(0, minX - pad),
     y: Math.max(0, minY - pad),
-    w: bw + pad * 2,
-    h: bh + pad * 2,
+    w: side + pad * 2,
+    h: side + pad * 2,
   };
 }
 

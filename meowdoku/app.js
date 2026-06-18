@@ -151,6 +151,7 @@ function bindEvents() {
     state.customColors = null;
     if (state.selectedColor !== ERASER && state.selectedColor >= state.size) state.selectedColor = 0;
     clearHint();
+    document.getElementById('ai-btn').hidden = true;
     renderPalette();
     renderGrid();
   });
@@ -161,6 +162,7 @@ function bindEvents() {
     state.revealed = 0;
     state.customColors = null;
     clearHint();
+    document.getElementById('ai-btn').hidden = true;
     renderPalette();
     renderGrid();
   });
@@ -174,6 +176,14 @@ function bindEvents() {
 
   document.getElementById('paste-btn').addEventListener('click', () => {
     openImageFromClipboard(state.size, handleImageResult);
+  });
+
+  document.getElementById('ai-btn').addEventListener('click', () => {
+    detectWithGemini(state.size, handleImageResult, (msg) => {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = 'status';
+    });
   });
 
   document.addEventListener('paste', (e) => {
@@ -326,11 +336,21 @@ function generateHintText(step) {
 // ── Image import ───────────────────────────────────────────────────────────
 
 function handleImageResult(result) {
+  // Adopt the detected grid dimension (AI may return a different size)
+  const n = Math.max(5, Math.min(12, result.grid.length));
+  if (n !== state.size) {
+    state.size = n;
+    document.getElementById('size-slider').value = n;
+    document.getElementById('size-label').textContent = `${n} × ${n}`;
+    if (state.selectedColor !== ERASER && state.selectedColor >= n) state.selectedColor = 0;
+  }
+
   state.grid = result.grid;
   state.customColors = result.colors;
   state.solution = null;
   state.revealed = 0;
   clearHint();
+  document.getElementById('ai-btn').hidden = false;
   if (result.colorCount < state.size) {
     const el = document.getElementById('status');
     el.textContent = `Only ${result.colorCount} colors detected — is the grid really ${state.size}×${state.size}?`;
