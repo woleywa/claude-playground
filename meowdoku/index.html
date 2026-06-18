@@ -13,10 +13,6 @@
     </header>
 
     <div class="top-controls">
-      <div class="size-control">
-        <span class="size-label" id="size-label">10 × 10</span>
-        <input type="range" id="size-slider" min="5" max="12" value="10" step="1">
-      </div>
       <div class="action-buttons">
         <button id="photo-btn" class="btn btn-secondary" title="Load from screenshot">📷</button>
         <button id="paste-btn" class="btn btn-secondary" title="Paste from clipboard">📋</button>
@@ -54,6 +50,12 @@
         <button id="img-confirm" class="btn btn-primary">Use this ✓</button>
       </div>
     </div>
+  </div>
+
+  <!-- Fixed bottom bar: size slider -->
+  <div class="size-bar">
+    <span class="size-label" id="size-label">10 × 10</span>
+    <input type="range" id="size-slider" min="5" max="12" value="10" step="1">
   </div>
 
   <script src="solver.js"></script>
