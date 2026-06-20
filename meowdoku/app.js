@@ -15,6 +15,48 @@ const COLORS = [
 
 const ERASER = -1;
 
+function approxColorName(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const s = max === min ? 0 : (max - min) / (1 - Math.abs(2 * l - 1));
+  if (s < 0.12) return l < 0.25 ? 'Black' : l > 0.75 ? 'White' : 'Grey';
+  const d = max - min;
+  let h = 0;
+  if (d > 0) {
+    if (max === r) h = ((g - b) / d + 6) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h = h / 6 * 360;
+  }
+  if (h >= 15 && h < 50 && l < 0.4) return 'Brown';
+  if (h < 15 || h >= 345) return 'Red';
+  if (h < 38) return 'Orange';
+  if (h < 65) return 'Yellow';
+  if (h < 80) return 'Lime';
+  if (h < 160) return 'Green';
+  if (h < 195) return 'Teal';
+  if (h < 255) return 'Blue';
+  if (h < 285) return 'Purple';
+  if (h < 325) return 'Pink';
+  if (h < 345) return 'Magenta';
+  return 'Red';
+}
+
+function namedCustomColors(colors) {
+  const base = colors.map(hex => hex ? approxColorName(hex) : 'Color');
+  const count = {};
+  for (const n of base) count[n] = (count[n] || 0) + 1;
+  const seen = {};
+  return base.map(n => {
+    if (count[n] === 1) return n;
+    seen[n] = (seen[n] || 0) + 1;
+    return `${n} ${seen[n]}`;
+  });
+}
+
 const state = {
   size: 10,
   grid: [],
@@ -56,7 +98,7 @@ function makeSwatch(idx) {
     btn.title = 'Erase';
   } else {
     btn.style.backgroundColor = cellColor(idx);
-    btn.title = state.customColors ? `Color ${idx + 1}` : (COLORS[idx]?.name ?? '');
+    btn.title = state.customColors ? namedCustomColors(state.customColors)[idx] : (COLORS[idx]?.name ?? '');
   }
 
   btn.addEventListener('click', () => { state.selectedColor = idx; renderPalette(); });
@@ -301,7 +343,7 @@ function generateHintText(step) {
   const row = step;
   const col = solution[row];
   const colorIdx = grid[row][col];
-  const colorName = customColors ? `Color ${colorIdx + 1}` : (COLORS[colorIdx]?.name ?? `Color ${colorIdx + 1}`);
+  const colorName = customColors ? namedCustomColors(customColors)[colorIdx] : (COLORS[colorIdx]?.name ?? `Color ${colorIdx + 1}`);
 
   // Build placed state for rows 0..step-1
   const usedCols = new Set();
@@ -344,7 +386,8 @@ function generateHintText(step) {
 
 function generateExplanation(step) {
   const { solution, grid, customColors, size: n } = state;
-  const cName = (ci) => customColors ? `Color ${ci + 1}` : (COLORS[ci]?.name ?? `Color ${ci + 1}`);
+  const named = customColors ? namedCustomColors(customColors) : null;
+  const cName = (ci) => named ? named[ci] : (COLORS[ci]?.name ?? `Color ${ci + 1}`);
 
   const usedCols = new Set();
   const usedColors = new Set();
