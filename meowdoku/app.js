@@ -518,9 +518,29 @@ function generateExplanation(step) {
     if (usedColors.has(cellCi)) return `${cName(cellCi)} region already placed`;
     const adj = cats.find(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
     if (adj) return `diagonal to cat in row ${adj.row + 1}`;
-    return forwardReason2(r, c) ?? confinementReason(r, c) ?? 'leads to a dead end';
+    return forwardReason2(r, c) ?? confinementReason(r, c) ?? 'no simple rule — solver verified';
   };
 
+  // Priority 1: direct-constraint forced (no forward-check — clearest explanation)
+  let directForcedColor = -1, directForcedCell = null;
+  for (let dci = 0; dci < n; dci++) {
+    if (usedColors.has(dci)) continue;
+    const valid = [];
+    for (let r = step; r < n; r++)
+      for (let c = 0; c < n; c++)
+        if (grid[r][c] === dci && isDirectValid(r, c)) valid.push({ row: r, col: c });
+    if (valid.length === 1) { directForcedColor = dci; directForcedCell = valid[0]; break; }
+  }
+  let directForcedRow = -1, directForcedCol = -1;
+  if (directForcedColor < 0) {
+    for (let r = step; r < n; r++) {
+      const valid = [];
+      for (let c = 0; c < n; c++) if (isDirectValid(r, c)) valid.push(c);
+      if (valid.length === 1) { directForcedRow = r; directForcedCol = valid[0]; break; }
+    }
+  }
+
+  // Priority 2: forward-check forced (1-level)
   const rowValidFC = {};
   for (let r = step; r < n; r++) {
     rowValidFC[r] = [];
@@ -537,7 +557,6 @@ function generateExplanation(step) {
         if (grid[r][c] === ci && isDirectValid(r, c) && !forwardReason(r, c))
           colorValidFC[ci].push({ row: r, col: c });
   }
-
   let bestRow = -1, bestRowCol = -1;
   for (let r = step; r < n; r++) {
     if (rowValidFC[r]?.length === 1) { bestRow = r; bestRowCol = rowValidFC[r][0]; break; }
@@ -548,6 +567,32 @@ function generateExplanation(step) {
   }
 
   const lines = [];
+
+  if (directForcedColor >= 0) {
+    const { row, col } = directForcedCell;
+    lines.push(`The ${cName(directForcedColor)} cat is forced — only one cell in this region isn't already blocked.`);
+    lines.push(`→ Place it at row ${row + 1}, col ${col + 1}.`);
+    const others = [];
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++)
+        if (grid[r][c] === directForcedColor && !(r === row && c === col))
+          others.push(`  • (${r + 1},${c + 1}): ${blockReason(r, c)}`);
+    if (others.length) { lines.push(''); lines.push(`Other ${cName(directForcedColor)} cells are blocked:`); others.forEach(l => lines.push(l)); }
+    return lines.join('\n');
+  }
+
+  if (directForcedRow >= 0) {
+    const c = directForcedCol;
+    const ci = grid[directForcedRow][c];
+    lines.push(`Row ${directForcedRow + 1} is forced — only col ${c + 1} is valid (${cName(ci)}).`);
+    lines.push('');
+    lines.push(`Other columns in row ${directForcedRow + 1} are blocked:`);
+    for (let cc = 0; cc < n; cc++) {
+      if (cc === c) continue;
+      lines.push(`  • Col ${cc + 1}: ${blockReason(directForcedRow, cc)}`);
+    }
+    return lines.join('\n');
+  }
 
   if (bestColor >= 0) {
     const { row, col } = bestColorCell;
@@ -575,8 +620,19 @@ function generateExplanation(step) {
     return lines.join('\n');
   }
 
-  // Fallback: explain the solver's next step; group columns that share the same reason
-  const row = step, col = solution[step], ci = grid[step][solution[step]];
+  // Fallback: pick the row with the most clearly-explainable blocked columns
+  const DEAD_END = 'no simple rule — solver verified';
+  let fbRow = step, fbCol = solution[step];
+  let maxClear = -1;
+  for (let r = step; r < n; r++) {
+    let clear = 0;
+    for (let c = 0; c < n; c++) {
+      if (c === solution[r]) continue;
+      if (blockReason(r, c) !== DEAD_END) clear++;
+    }
+    if (clear > maxClear) { maxClear = clear; fbRow = r; fbCol = solution[r]; }
+  }
+  const row = fbRow, col = fbCol, ci = grid[fbRow][fbCol];
   lines.push(`Next: row ${row + 1}, col ${col + 1} — ${cName(ci)}.`);
   lines.push('');
   lines.push(`Other columns in row ${row + 1} are blocked:`);
