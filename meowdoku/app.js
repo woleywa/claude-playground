@@ -65,7 +65,8 @@ const state = {
   solution: null,   // placed[row] = col, or null
   revealed: 0,      // how many rows' cats are currently shown
   customColors: null, // rgb strings from screenshot, or null for palette mode
-  xMarks: null,     // boolean[row][col] — X-marked cells detected in screenshot
+  xMarks: null,       // boolean[row][col] — X-marked cells detected in screenshot
+  importedCats: [],   // [{row,col}] — cats already placed in the imported screenshot
 };
 
 function createGrid(size) {
@@ -123,18 +124,20 @@ function renderGrid() {
       const color = cellColor(state.grid[r][c]);
       if (color) cell.style.backgroundColor = color;
 
-      if (state.solution !== null && r < state.revealed) {
-        if (state.solution[r] === c) {
-          cell.classList.add('cat');
-          const span = document.createElement('span');
-          span.textContent = '🐱';
-          cell.appendChild(span);
-        } else {
-          cell.classList.add('excluded');
-          const span = document.createElement('span');
-          span.textContent = '✕';
-          cell.appendChild(span);
-        }
+      const isImportedCat = state.importedCats.some(ic => ic.row === r && ic.col === c);
+      const isRevealedCat = state.solution !== null && r < state.revealed && state.solution[r] === c;
+      const isRevealedX   = state.solution !== null && r < state.revealed && state.solution[r] !== c;
+
+      if (isImportedCat || isRevealedCat) {
+        cell.classList.add('cat');
+        const span = document.createElement('span');
+        span.textContent = '🐱';
+        cell.appendChild(span);
+      } else if (isRevealedX) {
+        cell.classList.add('excluded');
+        const span = document.createElement('span');
+        span.textContent = '✕';
+        cell.appendChild(span);
       } else if (state.xMarks?.[r]?.[c]) {
         cell.classList.add('imported-x');
         const span = document.createElement('span');
@@ -211,6 +214,7 @@ function bindEvents() {
     state.revealed = 0;
     state.customColors = null;
     state.xMarks = null;
+    state.importedCats = [];
     clearHint();
     document.getElementById('ai-btn').hidden = true;
     renderPalette();
@@ -339,22 +343,38 @@ function showHint(text) {
 }
 
 function generateHintText(step) {
-  const { solution, grid, customColors, size: n } = state;
-  const row = step;
+  const { solution, grid, customColors, size: n, importedCats } = state;
+
+  // Find the next unplaced row (skip rows already covered by importedCats)
+  const importedRows = new Set((importedCats || []).map(ic => ic.row));
+  let nextRow = step;
+  while (nextRow < n && importedRows.has(nextRow)) nextRow++;
+  if (nextRow >= n) return 'All rows are already covered by placed cats.';
+
+  const row = nextRow;
   const col = solution[row];
   const colorIdx = grid[row][col];
   const colorName = customColors ? namedCustomColors(customColors)[colorIdx] : (COLORS[colorIdx]?.name ?? `Color ${colorIdx + 1}`);
 
-  // Build placed state for rows 0..step-1
+  // Build placed state: solution rows 0..step-1 plus any imported cats
   const usedCols = new Set();
   const usedColorIdxs = new Set();
-  const placedRows = []; // { row, col }
+  const placedRows = [];
+  const placedRowSet = new Set();
+  for (const ic of (importedCats || [])) {
+    usedCols.add(ic.col);
+    usedColorIdxs.add(grid[ic.row][ic.col]);
+    placedRows.push({ row: ic.row, col: ic.col });
+    placedRowSet.add(ic.row);
+  }
   for (let r = 0; r < step; r++) {
+    if (placedRowSet.has(r)) continue;
     usedCols.add(solution[r]);
     usedColorIdxs.add(grid[r][solution[r]]);
     placedRows.push({ row: r, col: solution[r] });
   }
-  const prevCol = step > 0 ? solution[step - 1] : -1;
+  const lastPlaced = placedRows.length > 0 ? placedRows[placedRows.length - 1] : null;
+  const prevCol = lastPlaced ? lastPlaced.col : -1;
 
   // Categorise eliminated columns
   const taken = [], colorPlaced = [], diag = [], deadEnd = [];
@@ -375,7 +395,8 @@ function generateHintText(step) {
     }
   }
 
-  const lines = [`Hint ${step + 1}/${n}: Row ${row + 1}, column ${col + 1} — ${colorName}`];
+  const hintNum = step + 1 - [...importedRows].filter(r => r < step).length;
+  const lines = [`Hint ${hintNum}/${n - importedRows.size}: Row ${row + 1}, column ${col + 1} — ${colorName}`];
   if (taken.length)      lines.push(`✗ Taken: ${taken.join(', ')}`);
   if (colorPlaced.length) lines.push(`✗ Color already placed: ${colorPlaced.join(', ')}`);
   if (diag.length)       lines.push(`✗ Diagonal to cat in row ${step}: ${diag.join(', ')}`);
@@ -385,24 +406,33 @@ function generateHintText(step) {
 }
 
 function generateExplanation(step) {
-  const { solution, grid, customColors, size: n } = state;
+  const { solution, grid, customColors, size: n, importedCats } = state;
   const named = customColors ? namedCustomColors(customColors) : null;
   const cName = (ci) => named ? named[ci] : (COLORS[ci]?.name ?? `Color ${ci + 1}`);
 
   const usedCols = new Set();
   const usedColors = new Set();
   const cats = [];
+  const placedRowSet = new Set();
+  for (const ic of (importedCats || [])) {
+    usedCols.add(ic.col);
+    usedColors.add(grid[ic.row][ic.col]);
+    cats.push({ row: ic.row, col: ic.col });
+    placedRowSet.add(ic.row);
+  }
   for (let r = 0; r < step; r++) {
+    if (placedRowSet.has(r)) continue;
     usedCols.add(solution[r]);
     usedColors.add(grid[r][solution[r]]);
     cats.push({ row: r, col: solution[r] });
+    placedRowSet.add(r);
   }
 
   const xMarks = state.xMarks;
 
   const isDirectValid = (row, col) => {
     const ci = grid[row][col];
-    if (ci < 0 || row < step) return false;
+    if (ci < 0 || placedRowSet.has(row)) return false;
     if (usedCols.has(col) || usedColors.has(ci)) return false;
     if (xMarks?.[row]?.[col]) return false;
     return !cats.some(p => Math.abs(p.row - row) === 1 && Math.abs(p.col - col) <= 1);
@@ -414,7 +444,7 @@ function generateExplanation(step) {
     const simCols = new Set([...sCols, c]);
     const simColors = new Set([...sColors, ci]);
     const simCats = [...sCats, { row: r, col: c }];
-    for (let rr = step; rr < n; rr++) {
+    for (let rr = 0; rr < n; rr++) {
       if (simCats.some(p => p.row === rr)) continue;
       let ok = false;
       for (let cc = 0; cc < n && !ok; cc++) {
@@ -429,7 +459,7 @@ function generateExplanation(step) {
     for (let ci2 = 0; ci2 < n; ci2++) {
       if (simColors.has(ci2)) continue;
       let ok = false;
-      done: for (let rr = step; rr < n; rr++) {
+      done: for (let rr = 0; rr < n; rr++) {
         if (simCats.some(p => p.row === rr)) continue;
         for (let cc = 0; cc < n; cc++) {
           if (grid[rr][cc] !== ci2 || simCols.has(cc)) continue;
@@ -454,8 +484,8 @@ function generateExplanation(step) {
     const simCols = new Set([...usedCols, c]);
     const simColors = new Set([...usedColors, ci]);
     const simCats = [...cats, { row: r, col: c }];
-    for (let rr = step; rr < n; rr++) {
-      if (rr === r) continue;
+    for (let rr = 0; rr < n; rr++) {
+      if (placedRowSet.has(rr) || rr === r) continue;
       let hasForwardValid = false;
       for (let cc = 0; cc < n; cc++) {
         const rci = grid[rr][cc];
@@ -480,7 +510,7 @@ function generateExplanation(step) {
     for (let ci2 = 0; ci2 < n; ci2++) {
       if (simColors.has(ci2)) continue;
       const vRows = new Set(), vCols = new Set();
-      for (let rr = step; rr < n; rr++) {
+      for (let rr = 0; rr < n; rr++) {
         if (simCats.some(p => p.row === rr)) continue;
         for (let cc = 0; cc < n; cc++) {
           if (grid[rr][cc] !== ci2 || simCols.has(cc)) continue;
@@ -508,7 +538,7 @@ function generateExplanation(step) {
 
   const blockReason = (r, c) => {
     const cellCi = grid[r][c];
-    if (r < step) return `row ${r + 1} already solved`;
+    if (placedRowSet.has(r)) return `row ${r + 1} already solved`;
     if (cellCi < 0) return 'uncolored cell';
     if (xMarks?.[r]?.[c]) return 'already crossed out in the puzzle';
     if (usedCols.has(c)) {
@@ -526,14 +556,17 @@ function generateExplanation(step) {
   for (let dci = 0; dci < n; dci++) {
     if (usedColors.has(dci)) continue;
     const valid = [];
-    for (let r = step; r < n; r++)
+    for (let r = 0; r < n; r++) {
+      if (placedRowSet.has(r)) continue;
       for (let c = 0; c < n; c++)
         if (grid[r][c] === dci && isDirectValid(r, c)) valid.push({ row: r, col: c });
+    }
     if (valid.length === 1) { directForcedColor = dci; directForcedCell = valid[0]; break; }
   }
   let directForcedRow = -1, directForcedCol = -1;
   if (directForcedColor < 0) {
-    for (let r = step; r < n; r++) {
+    for (let r = 0; r < n; r++) {
+      if (placedRowSet.has(r)) continue;
       const valid = [];
       for (let c = 0; c < n; c++) if (isDirectValid(r, c)) valid.push(c);
       if (valid.length === 1) { directForcedRow = r; directForcedCol = valid[0]; break; }
@@ -542,7 +575,8 @@ function generateExplanation(step) {
 
   // Priority 2: forward-check forced (1-level)
   const rowValidFC = {};
-  for (let r = step; r < n; r++) {
+  for (let r = 0; r < n; r++) {
+    if (placedRowSet.has(r)) continue;
     rowValidFC[r] = [];
     for (let c = 0; c < n; c++) {
       if (isDirectValid(r, c) && !forwardReason(r, c)) rowValidFC[r].push(c);
@@ -552,13 +586,16 @@ function generateExplanation(step) {
   for (let ci = 0; ci < n; ci++) {
     if (usedColors.has(ci)) continue;
     colorValidFC[ci] = [];
-    for (let r = step; r < n; r++)
+    for (let r = 0; r < n; r++) {
+      if (placedRowSet.has(r)) continue;
       for (let c = 0; c < n; c++)
         if (grid[r][c] === ci && isDirectValid(r, c) && !forwardReason(r, c))
           colorValidFC[ci].push({ row: r, col: c });
+    }
   }
   let bestRow = -1, bestRowCol = -1;
-  for (let r = step; r < n; r++) {
+  for (let r = 0; r < n; r++) {
+    if (placedRowSet.has(r)) continue;
     if (rowValidFC[r]?.length === 1) { bestRow = r; bestRowCol = rowValidFC[r][0]; break; }
   }
   let bestColor = -1, bestColorCell = null;
@@ -622,9 +659,11 @@ function generateExplanation(step) {
 
   // Fallback: pick the row with the most clearly-explainable blocked columns
   const DEAD_END = 'no simple rule — solver verified';
-  let fbRow = step, fbCol = solution[step];
+  let fbRow = -1, fbCol = -1;
   let maxClear = -1;
-  for (let r = step; r < n; r++) {
+  for (let r = 0; r < n; r++) {
+    if (placedRowSet.has(r)) continue;
+    if (fbRow < 0) { fbRow = r; fbCol = solution[r]; }
     let clear = 0;
     for (let c = 0; c < n; c++) {
       if (c === solution[r]) continue;
@@ -632,6 +671,7 @@ function generateExplanation(step) {
     }
     if (clear > maxClear) { maxClear = clear; fbRow = r; fbCol = solution[r]; }
   }
+  if (fbRow < 0) return 'All rows are already covered by placed cats.';
   const row = fbRow, col = fbCol, ci = grid[fbRow][fbCol];
   lines.push(`Next: row ${row + 1}, col ${col + 1} — ${cName(ci)}.`);
   lines.push('');
@@ -665,6 +705,7 @@ function handleImageResult(result) {
   state.grid = result.grid;
   state.customColors = result.colors;
   state.xMarks = result.xMarks || null;
+  state.importedCats = result.cats || [];
   state.solution = null;
   state.revealed = 0;
   clearHint();

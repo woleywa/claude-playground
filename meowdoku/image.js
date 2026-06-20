@@ -443,13 +443,29 @@ function _extractGrid(img, bounds, size) {
           const pBright = (r + g + b) / 3;
           if (r > 190 && g > 190 && b > 190 && pBright > bgBright + 35) xHits++;
         }
-      return { rgb: bgRgb, hasX: xHits >= 2 }; // 2+ of 9 inner points (≥22%)
+      // Cat detection: dark pixels significantly below background brightness.
+      // Cat emojis have dark outlines/fur; plain colored cells and X marks do not.
+      let catHits = 0;
+      for (let fr = 0.25; fr < 0.8; fr += 0.25)
+        for (let fc = 0.25; fc < 0.8; fc += 0.25) {
+          const px = Math.min(canvas.width - 1, Math.floor(x + (col + fc) * cw));
+          const py = Math.min(canvas.height - 1, Math.floor(y + (row + fr) * ch));
+          const i = (py * iw + px) * 4;
+          const r2 = data[i], g2 = data[i+1], b2 = data[i+2];
+          const pBright = (r2 + g2 + b2) / 3;
+          if (pBright < bgBright - 55 && pBright < 130) catHits++;
+        }
+      return { rgb: bgRgb, hasX: xHits >= 2, hasCat: catHits >= 3 };
     })
   );
 
   const xMarks = cells.map(row => row.map(cell => cell.hasX));
+  const cats = [];
+  for (let r = 0; r < n; r++)
+    for (let c = 0; c < n; c++)
+      if (cells[r][c].hasCat) cats.push({ row: r, col: c });
   const raw = cells.map(row => row.map(cell => cell.rgb));
-  return { ..._cluster(raw, n), xMarks };
+  return { ..._cluster(raw, n), xMarks, cats };
 }
 
 function _medRGB(pts) {
