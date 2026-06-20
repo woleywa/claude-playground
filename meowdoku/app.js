@@ -468,6 +468,44 @@ function generateExplanation(step) {
     return null;
   };
 
+  // Confinement check (naked-pair tactic): after placing (r,c), if two unplaced
+  // regions each have valid cells in only ONE row (or column), and it's the SAME
+  // row (or column), they can't both fit — a human-readable conflict.
+  const confinementReason = (r, c) => {
+    const ci = grid[r][c];
+    const simCols = new Set([...usedCols, c]);
+    const simColors = new Set([...usedColors, ci]);
+    const simCats = [...cats, { row: r, col: c }];
+    const rowsFor = new Map(), colsFor = new Map();
+    for (let ci2 = 0; ci2 < n; ci2++) {
+      if (simColors.has(ci2)) continue;
+      const vRows = new Set(), vCols = new Set();
+      for (let rr = step; rr < n; rr++) {
+        if (simCats.some(p => p.row === rr)) continue;
+        for (let cc = 0; cc < n; cc++) {
+          if (grid[rr][cc] !== ci2 || simCols.has(cc)) continue;
+          if (xMarks?.[rr]?.[cc]) continue;
+          if (simCats.some(p => Math.abs(p.row - rr) === 1 && Math.abs(p.col - cc) <= 1)) continue;
+          vRows.add(rr); vCols.add(cc);
+        }
+      }
+      if (vRows.size === 0) return null; // already caught by fwd1
+      rowsFor.set(ci2, vRows);
+      colsFor.set(ci2, vCols);
+    }
+    const rowLocked = [...rowsFor.entries()].filter(([, s]) => s.size === 1);
+    for (let i = 0; i < rowLocked.length - 1; i++)
+      for (let j = i + 1; j < rowLocked.length; j++)
+        if ([...rowLocked[i][1]][0] === [...rowLocked[j][1]][0])
+          return `would force ${cName(rowLocked[i][0])} and ${cName(rowLocked[j][0])} to compete for the same row`;
+    const colLocked = [...colsFor.entries()].filter(([, s]) => s.size === 1);
+    for (let i = 0; i < colLocked.length - 1; i++)
+      for (let j = i + 1; j < colLocked.length; j++)
+        if ([...colLocked[i][1]][0] === [...colLocked[j][1]][0])
+          return `would force ${cName(colLocked[i][0])} and ${cName(colLocked[j][0])} to compete for the same column`;
+    return null;
+  };
+
   const blockReason = (r, c) => {
     const cellCi = grid[r][c];
     if (r < step) return `row ${r + 1} already solved`;
@@ -480,7 +518,7 @@ function generateExplanation(step) {
     if (usedColors.has(cellCi)) return `${cName(cellCi)} region already placed`;
     const adj = cats.find(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
     if (adj) return `diagonal to cat in row ${adj.row + 1}`;
-    return forwardReason2(r, c) ?? 'makes the puzzle unsolvable';
+    return forwardReason2(r, c) ?? confinementReason(r, c) ?? 'leads to a dead end';
   };
 
   const rowValidFC = {};
