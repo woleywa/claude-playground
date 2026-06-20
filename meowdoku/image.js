@@ -427,8 +427,15 @@ function _extractGrid(img, bounds, size) {
           const i = (py * iw + px) * 4;
           pts.push([data[i], data[i+1], data[i+2]]);
         }
-      const whiteFrac = pts.filter(([r,g,b]) => r > 210 && g > 210 && b > 210).length / pts.length;
-      return { rgb: _medRGB(pts), hasX: whiteFrac > 0.3 };
+      const bgRgb = _medRGB(pts);
+      const bgBright = (bgRgb[0] + bgRgb[1] + bgRgb[2]) / 3;
+      // Count pixels that are near-white AND significantly brighter than the cell background.
+      // Using relative brightness prevents light-colored cells from being falsely detected.
+      const xFrac = pts.filter(([r,g,b]) => {
+        const pBright = (r + g + b) / 3;
+        return r > 200 && g > 200 && b > 200 && pBright > bgBright + 40;
+      }).length / pts.length;
+      return { rgb: bgRgb, hasX: xFrac > 0.15 };
     })
   );
 
