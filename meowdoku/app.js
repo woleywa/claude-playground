@@ -532,11 +532,16 @@ function runHint() {
 function runExplain() {
   if (!ensureSolution()) return;
   if (state.revealed >= state.size) {
-    clearHint();
-    return;
+    // All cats shown — reset grid and explain from step 0
+    state.revealed = 0;
+    renderGrid();
   }
-  showHint(generateExplanation(state.revealed));
-  // Does NOT advance state.revealed — use Hint to actually reveal the cat
+  try {
+    showHint(generateExplanation(state.revealed));
+  } catch (e) {
+    showHint('Could not generate explanation — check the browser console.');
+    console.error('generateExplanation error:', e);
+  }
 }
 
 function runSolveAll() {
