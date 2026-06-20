@@ -23,6 +23,7 @@ const state = {
   solution: null,   // placed[row] = col, or null
   revealed: 0,      // how many rows' cats are currently shown
   customColors: null, // rgb strings from screenshot, or null for palette mode
+  xMarks: null,     // boolean[row][col] — X-marked cells detected in screenshot
 };
 
 function createGrid(size) {
@@ -92,6 +93,11 @@ function renderGrid() {
           span.textContent = '✕';
           cell.appendChild(span);
         }
+      } else if (state.xMarks?.[r]?.[c]) {
+        cell.classList.add('imported-x');
+        const span = document.createElement('span');
+        span.textContent = '✕';
+        cell.appendChild(span);
       }
 
       gridEl.appendChild(cell);
@@ -149,6 +155,7 @@ function bindEvents() {
     state.solution = null;
     state.revealed = 0;
     state.customColors = null;
+    state.xMarks = null;
     if (state.selectedColor !== ERASER && state.selectedColor >= state.size) state.selectedColor = 0;
     clearHint();
     document.getElementById('ai-btn').hidden = true;
@@ -161,6 +168,7 @@ function bindEvents() {
     state.solution = null;
     state.revealed = 0;
     state.customColors = null;
+    state.xMarks = null;
     clearHint();
     document.getElementById('ai-btn').hidden = true;
     renderPalette();
@@ -169,6 +177,7 @@ function bindEvents() {
 
   document.getElementById('solve-btn').addEventListener('click', runSolveAll);
   document.getElementById('hint-btn').addEventListener('click', runHint);
+  document.getElementById('explain-btn').addEventListener('click', runExplain);
 
   document.getElementById('photo-btn').addEventListener('click', () => {
     openImagePicker(state.size, handleImageResult);
@@ -333,6 +342,116 @@ function generateHintText(step) {
   return lines.join('\n');
 }
 
+function generateExplanation(step) {
+  const { solution, grid, customColors, size: n } = state;
+  const cName = (ci) => customColors ? `Color ${ci + 1}` : (COLORS[ci]?.name ?? `Color ${ci + 1}`);
+
+  const usedCols = new Set();
+  const usedColors = new Set();
+  const cats = [];
+  for (let r = 0; r < step; r++) {
+    usedCols.add(solution[r]);
+    usedColors.add(grid[r][solution[r]]);
+    cats.push({ row: r, col: solution[r] });
+  }
+
+  const isValid = (row, col) => {
+    const ci = grid[row][col];
+    if (ci < 0 || row < step) return false;
+    if (usedCols.has(col) || usedColors.has(ci)) return false;
+    return !cats.some(p => Math.abs(p.row - row) === 1 && Math.abs(p.col - col) <= 1);
+  };
+
+  const blockReason = (r, c) => {
+    const cellCi = grid[r][c];
+    if (r < step) return `row ${r + 1} already solved`;
+    if (cellCi < 0) return 'uncolored cell';
+    if (usedCols.has(c)) {
+      const occ = cats.find(p => p.col === c);
+      return `col ${c + 1} taken (cat in row ${occ ? occ.row + 1 : '?'})`;
+    }
+    if (usedColors.has(cellCi)) return `${cName(cellCi)} region already placed`;
+    const adj = cats.find(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
+    if (adj) return `diagonal to cat in row ${adj.row + 1}`;
+    return 'no valid continuation';
+  };
+
+  // Valid columns per unplaced row
+  const rowOpts = {};
+  for (let r = step; r < n; r++) {
+    rowOpts[r] = [];
+    for (let c = 0; c < n; c++) if (isValid(r, c)) rowOpts[r].push(c);
+  }
+
+  // Valid cells per unplaced color
+  const colorOpts = {};
+  for (let ci = 0; ci < n; ci++) {
+    if (usedColors.has(ci)) continue;
+    colorOpts[ci] = [];
+    for (let r = step; r < n; r++)
+      for (let c = 0; c < n; c++)
+        if (grid[r][c] === ci && isValid(r, c)) colorOpts[ci].push({ row: r, col: c });
+  }
+
+  const row = step;
+  const col = solution[step];
+  const ci = grid[row][col];
+  const lines = [];
+
+  // P1: color region forced to exactly 1 cell
+  if (colorOpts[ci]?.length === 1) {
+    lines.push(`The ${cName(ci)} cat is forced — only one valid cell left in this region.`);
+    lines.push(`→ Place it at row ${row + 1}, col ${col + 1}.`);
+    const others = [];
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++)
+        if (grid[r][c] === ci && !(r === row && c === col))
+          others.push(`  • (${r + 1},${c + 1}): ${blockReason(r, c)}`);
+    if (others.length) {
+      lines.push('');
+      lines.push(`All other ${cName(ci)} cells are blocked:`);
+      others.forEach(l => lines.push(l));
+    }
+    return lines.join('\n');
+  }
+
+  // P2: row forced to exactly 1 column
+  if (rowOpts[row]?.length === 1) {
+    lines.push(`Row ${row + 1} is forced — only col ${col + 1} is valid (${cName(ci)}).`);
+    lines.push('');
+    lines.push(`All other columns in row ${row + 1} are blocked:`);
+    for (let c = 0; c < n; c++) {
+      if (c === col) continue;
+      lines.push(`  • Col ${c + 1}: ${blockReason(row, c)}`);
+    }
+    return lines.join('\n');
+  }
+
+  // P3: column forced to exactly 1 row
+  const colOpts = [];
+  for (let r = step; r < n; r++) if (isValid(r, col)) colOpts.push(r);
+  if (colOpts.length === 1) {
+    lines.push(`Col ${col + 1} is forced — only row ${row + 1} is valid (${cName(ci)}).`);
+    lines.push('');
+    lines.push(`All other rows in col ${col + 1} are blocked:`);
+    for (let r = 0; r < n; r++) {
+      if (r === row) continue;
+      lines.push(`  • Row ${r + 1}: ${blockReason(r, col)}`);
+    }
+    return lines.join('\n');
+  }
+
+  // Fallback: constraints for this row
+  lines.push(`Next: row ${row + 1}, col ${col + 1} — ${cName(ci)}.`);
+  lines.push('');
+  lines.push(`Other columns in row ${row + 1} are blocked:`);
+  for (let c = 0; c < n; c++) {
+    if (c === col) continue;
+    lines.push(`  ✗ Col ${c + 1}: ${blockReason(row, c)}`);
+  }
+  return lines.join('\n');
+}
+
 // ── Image import ───────────────────────────────────────────────────────────
 
 function handleImageResult(result) {
@@ -347,6 +466,7 @@ function handleImageResult(result) {
 
   state.grid = result.grid;
   state.customColors = result.colors;
+  state.xMarks = result.xMarks || null;
   state.solution = null;
   state.revealed = 0;
   clearHint();
@@ -407,6 +527,16 @@ function runHint() {
   state.revealed++;
   renderGrid();
   showHint(hintText);
+}
+
+function runExplain() {
+  if (!ensureSolution()) return;
+  if (state.revealed >= state.size) {
+    clearHint();
+    return;
+  }
+  showHint(generateExplanation(state.revealed));
+  // Does NOT advance state.revealed — use Hint to actually reveal the cat
 }
 
 function runSolveAll() {

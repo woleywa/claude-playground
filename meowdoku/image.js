@@ -416,8 +416,8 @@ function _extractGrid(img, bounds, size) {
   const { x, y, w, h } = bounds;
   const cw = w / n, ch = h / n;
 
-  // Sample a 5×5 grid per cell and take the median — robust against X-mark overlays
-  const raw = Array.from({ length: n }, (_, row) =>
+  // Sample a 5×5 grid per cell; record color and whether the cell has a white X overlay
+  const cells = Array.from({ length: n }, (_, row) =>
     Array.from({ length: n }, (_, col) => {
       const pts = [];
       for (let fr = 0.1; fr <= 0.91; fr += 0.2)
@@ -427,11 +427,14 @@ function _extractGrid(img, bounds, size) {
           const i = (py * iw + px) * 4;
           pts.push([data[i], data[i+1], data[i+2]]);
         }
-      return _medRGB(pts);
+      const whiteFrac = pts.filter(([r,g,b]) => r > 210 && g > 210 && b > 210).length / pts.length;
+      return { rgb: _medRGB(pts), hasX: whiteFrac > 0.3 };
     })
   );
 
-  return _cluster(raw, n);
+  const xMarks = cells.map(row => row.map(cell => cell.hasX));
+  const raw = cells.map(row => row.map(cell => cell.rgb));
+  return { ..._cluster(raw, n), xMarks };
 }
 
 function _medRGB(pts) {

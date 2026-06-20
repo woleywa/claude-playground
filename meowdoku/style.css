@@ -111,8 +111,10 @@ input[type="range"]::-moz-range-thumb {
 
 .action-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
   flex-shrink: 0;
+  justify-content: flex-end;
 }
 
 .btn {
@@ -145,6 +147,11 @@ input[type="range"]::-moz-range-thumb {
 .btn-hint {
   background: #e8d860;
   color: #5a4800;
+}
+
+.btn-explain {
+  background: #3a8fc8;
+  color: #fff;
 }
 
 .btn-ai {
@@ -259,6 +266,15 @@ input[type="range"]::-moz-range-thumb {
   color: rgba(255, 255, 255, 0.55);
   font-weight: 900;
   animation: xpop 0.12s ease-out;
+}
+
+.cell.imported-x span {
+  font-size: calc(0.38 * min(calc(100vw - 2rem), 480px) / var(--grid-size));
+  pointer-events: none;
+  display: block;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.28);
+  font-weight: 900;
 }
 
 @keyframes catpop {
