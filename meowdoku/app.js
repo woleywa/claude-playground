@@ -355,7 +355,6 @@ function generateExplanation(step) {
     cats.push({ row: r, col: solution[r] });
   }
 
-  // Basic validity (direct constraints only)
   const isDirectValid = (row, col) => {
     const ci = grid[row][col];
     if (ci < 0 || row < step) return false;
@@ -363,15 +362,14 @@ function generateExplanation(step) {
     return !cats.some(p => Math.abs(p.row - row) === 1 && Math.abs(p.col - col) <= 1);
   };
 
-  // One-level forward check: simulate placing at (r,c), return what breaks or null
-  const forwardReason = (r, c) => {
+  // One-level forward check from a given simulation state (sCols/sColors/sCats are pre-placement)
+  const fwd1 = (r, c, sCols, sColors, sCats) => {
     const ci = grid[r][c];
-    const simCols = new Set([...usedCols, c]);
-    const simColors = new Set([...usedColors, ci]);
-    const simCats = [...cats, { row: r, col: c }];
-    // Check each other unplaced row still has a valid cell
+    const simCols = new Set([...sCols, c]);
+    const simColors = new Set([...sColors, ci]);
+    const simCats = [...sCats, { row: r, col: c }];
     for (let rr = step; rr < n; rr++) {
-      if (rr === r) continue;
+      if (simCats.some(p => p.row === rr)) continue;
       let ok = false;
       for (let cc = 0; cc < n && !ok; cc++) {
         const rci = grid[rr][cc];
@@ -381,16 +379,15 @@ function generateExplanation(step) {
       }
       if (!ok) return `would leave row ${rr + 1} with no valid placement`;
     }
-    // Check each unplaced color region still has a valid cell
     for (let ci2 = 0; ci2 < n; ci2++) {
       if (simColors.has(ci2)) continue;
       let ok = false;
-      outer: for (let rr = step; rr < n; rr++) {
+      done: for (let rr = step; rr < n; rr++) {
         if (simCats.some(p => p.row === rr)) continue;
         for (let cc = 0; cc < n; cc++) {
           if (grid[rr][cc] !== ci2 || simCols.has(cc)) continue;
           if (simCats.some(p => Math.abs(p.row - rr) === 1 && Math.abs(p.col - cc) <= 1)) continue;
-          ok = true; break outer;
+          ok = true; break done;
         }
       }
       if (!ok) return `would leave the ${cName(ci2)} region with no valid placement`;
@@ -398,7 +395,31 @@ function generateExplanation(step) {
     return null;
   };
 
-  // Full block reason for any cell
+  const forwardReason = (r, c) => fwd1(r, c, usedCols, usedColors, cats);
+
+  // Two-level forward check: after placing (r,c), check if any remaining row has
+  // ALL its direct-valid options failing a 1-level check (so it will be stranded)
+  const forwardReason2 = (r, c) => {
+    const d1 = forwardReason(r, c);
+    if (d1) return d1;
+    const ci = grid[r][c];
+    const simCols = new Set([...usedCols, c]);
+    const simColors = new Set([...usedColors, ci]);
+    const simCats = [...cats, { row: r, col: c }];
+    for (let rr = step; rr < n; rr++) {
+      if (rr === r) continue;
+      let hasForwardValid = false;
+      for (let cc = 0; cc < n; cc++) {
+        const rci = grid[rr][cc];
+        if (rci < 0 || simCols.has(cc) || simColors.has(rci)) continue;
+        if (simCats.some(p => Math.abs(p.row - rr) === 1 && Math.abs(p.col - cc) <= 1)) continue;
+        if (!fwd1(rr, cc, simCols, simColors, simCats)) { hasForwardValid = true; break; }
+      }
+      if (!hasForwardValid) return `would leave row ${rr + 1} with no valid continuation`;
+    }
+    return null;
+  };
+
   const blockReason = (r, c) => {
     const cellCi = grid[r][c];
     if (r < step) return `row ${r + 1} already solved`;
@@ -410,10 +431,9 @@ function generateExplanation(step) {
     if (usedColors.has(cellCi)) return `${cName(cellCi)} region already placed`;
     const adj = cats.find(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
     if (adj) return `diagonal to cat in row ${adj.row + 1}`;
-    return forwardReason(r, c) ?? 'no valid continuation';
+    return forwardReason2(r, c) ?? 'makes the puzzle unsolvable';
   };
 
-  // For each unplaced row/color, count candidates that pass direct + forward check
   const rowValidFC = {};
   for (let r = step; r < n; r++) {
     rowValidFC[r] = [];
@@ -431,7 +451,6 @@ function generateExplanation(step) {
           colorValidFC[ci].push({ row: r, col: c });
   }
 
-  // Find the most-forced element (prefer any with exactly 1 valid option)
   let bestRow = -1, bestRowCol = -1;
   for (let r = step; r < n; r++) {
     if (rowValidFC[r]?.length === 1) { bestRow = r; bestRowCol = rowValidFC[r][0]; break; }
@@ -443,7 +462,6 @@ function generateExplanation(step) {
 
   const lines = [];
 
-  // Prefer explaining a forced color region (clearest insight)
   if (bestColor >= 0) {
     const { row, col } = bestColorCell;
     lines.push(`The ${cName(bestColor)} cat is forced — only one valid cell in this region.`);
@@ -457,7 +475,6 @@ function generateExplanation(step) {
     return lines.join('\n');
   }
 
-  // Then a forced row
   if (bestRow >= 0) {
     const c = bestRowCol;
     const ci = grid[bestRow][c];
@@ -471,14 +488,21 @@ function generateExplanation(step) {
     return lines.join('\n');
   }
 
-  // Fallback: explain the solver's next step with forward-check reasons
+  // Fallback: explain the solver's next step; group columns that share the same reason
   const row = step, col = solution[step], ci = grid[step][solution[step]];
   lines.push(`Next: row ${row + 1}, col ${col + 1} — ${cName(ci)}.`);
   lines.push('');
   lines.push(`Other columns in row ${row + 1} are blocked:`);
+  const reasonGroups = new Map();
   for (let c = 0; c < n; c++) {
     if (c === col) continue;
-    lines.push(`  ✗ Col ${c + 1}: ${blockReason(row, c)}`);
+    const reason = blockReason(row, c);
+    if (!reasonGroups.has(reason)) reasonGroups.set(reason, []);
+    reasonGroups.get(reason).push(c + 1);
+  }
+  for (const [reason, cols] of reasonGroups) {
+    const colStr = cols.length === 1 ? `Col ${cols[0]}` : `Cols ${cols.join(', ')}`;
+    lines.push(`  ✗ ${colStr}: ${reason}`);
   }
   return lines.join('\n');
 }
