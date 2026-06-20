@@ -355,10 +355,13 @@ function generateExplanation(step) {
     cats.push({ row: r, col: solution[r] });
   }
 
+  const xMarks = state.xMarks;
+
   const isDirectValid = (row, col) => {
     const ci = grid[row][col];
     if (ci < 0 || row < step) return false;
     if (usedCols.has(col) || usedColors.has(ci)) return false;
+    if (xMarks?.[row]?.[col]) return false;
     return !cats.some(p => Math.abs(p.row - row) === 1 && Math.abs(p.col - col) <= 1);
   };
 
@@ -374,6 +377,7 @@ function generateExplanation(step) {
       for (let cc = 0; cc < n && !ok; cc++) {
         const rci = grid[rr][cc];
         if (rci < 0 || simCols.has(cc) || simColors.has(rci)) continue;
+        if (xMarks?.[rr]?.[cc]) continue;
         if (simCats.some(p => Math.abs(p.row - rr) === 1 && Math.abs(p.col - cc) <= 1)) continue;
         ok = true;
       }
@@ -386,6 +390,7 @@ function generateExplanation(step) {
         if (simCats.some(p => p.row === rr)) continue;
         for (let cc = 0; cc < n; cc++) {
           if (grid[rr][cc] !== ci2 || simCols.has(cc)) continue;
+          if (xMarks?.[rr]?.[cc]) continue;
           if (simCats.some(p => Math.abs(p.row - rr) === 1 && Math.abs(p.col - cc) <= 1)) continue;
           ok = true; break done;
         }
@@ -424,6 +429,7 @@ function generateExplanation(step) {
     const cellCi = grid[r][c];
     if (r < step) return `row ${r + 1} already solved`;
     if (cellCi < 0) return 'uncolored cell';
+    if (xMarks?.[r]?.[c]) return 'already crossed out in the puzzle';
     if (usedCols.has(c)) {
       const occ = cats.find(p => p.col === c);
       return `col ${c + 1} taken (cat in row ${occ ? occ.row + 1 : '?'})`;
