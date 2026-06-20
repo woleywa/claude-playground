@@ -416,7 +416,9 @@ function _extractGrid(img, bounds, size) {
   const { x, y, w, h } = bounds;
   const cw = w / n, ch = h / n;
 
-  // Sample a 5×5 grid per cell; record color and whether the cell has a white X overlay
+  // Sample a 5×5 grid per cell for color; a separate inner 3×3 for X detection.
+  // The inner grid (0.25–0.75) avoids the white/cream gap pixels visible at tile
+  // edges in the original app, which would otherwise cause false X detections.
   const cells = Array.from({ length: n }, (_, row) =>
     Array.from({ length: n }, (_, col) => {
       const pts = [];
@@ -429,13 +431,19 @@ function _extractGrid(img, bounds, size) {
         }
       const bgRgb = _medRGB(pts);
       const bgBright = (bgRgb[0] + bgRgb[1] + bgRgb[2]) / 3;
-      // Count pixels that are near-white AND significantly brighter than the cell background.
-      // Using relative brightness prevents light-colored cells from being falsely detected.
-      const xFrac = pts.filter(([r,g,b]) => {
-        const pBright = (r + g + b) / 3;
-        return r > 200 && g > 200 && b > 200 && pBright > bgBright + 40;
-      }).length / pts.length;
-      return { rgb: bgRgb, hasX: xFrac > 0.15 };
+      // Inner 3×3 (fractions 0.25, 0.50, 0.75) — safely inside any tile border/gap.
+      // Count pixels that are near-white AND significantly brighter than the background.
+      let xHits = 0;
+      for (let fr = 0.25; fr < 0.8; fr += 0.25)
+        for (let fc = 0.25; fc < 0.8; fc += 0.25) {
+          const px = Math.min(canvas.width - 1, Math.floor(x + (col + fc) * cw));
+          const py = Math.min(canvas.height - 1, Math.floor(y + (row + fr) * ch));
+          const i = (py * iw + px) * 4;
+          const r = data[i], g = data[i+1], b = data[i+2];
+          const pBright = (r + g + b) / 3;
+          if (r > 190 && g > 190 && b > 190 && pBright > bgBright + 35) xHits++;
+        }
+      return { rgb: bgRgb, hasX: xHits >= 2 }; // 2+ of 9 inner points (≥22%)
     })
   );
 
