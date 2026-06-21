@@ -481,67 +481,70 @@ function _dist(a, b) {
   return Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2);
 }
 
-function _mergePair(clusters, i, j) {
-  const ci = clusters[i], cj = clusters[j], n = ci.n + cj.n;
-  clusters[i] = {
-    rgb: [
-      Math.round((ci.rgb[0]*ci.n + cj.rgb[0]*cj.n) / n),
-      Math.round((ci.rgb[1]*ci.n + cj.rgb[1]*cj.n) / n),
-      Math.round((ci.rgb[2]*ci.n + cj.rgb[2]*cj.n) / n),
-    ],
-    n,
-  };
-  clusters.splice(j, 1);
-}
-
-function _closestPair(clusters) {
-  let minD = Infinity, mi = -1, mj = -1;
-  for (let i = 0; i < clusters.length; i++)
-    for (let j = i + 1; j < clusters.length; j++) {
-      const d = _dist(clusters[i].rgb, clusters[j].rgb);
-      if (d < minD) { minD = d; mi = i; mj = j; }
-    }
-  return { minD, mi, mj };
-}
-
 function _cluster(raw, size) {
   const flat = raw.flat();
-  const clusters = []; // { rgb:[r,g,b], n:count }
-  const THRESH = 60;
+  const n = size;
 
+  // K-means++ initialization: spread centers across color space.
+  // Seed 1 = most-saturated pixel (avoids starting in a neutral/grey zone).
+  const centers = [];
+  let bestSat = -1, seed = flat[0];
   for (const rgb of flat) {
-    let best = -1, bestD = Infinity;
-    clusters.forEach((c, i) => { const d = _dist(c.rgb, rgb); if (d < bestD) { bestD = d; best = i; } });
-    if (best >= 0 && bestD < THRESH) {
-      const c = clusters[best], n = c.n;
-      c.rgb = [
-        Math.round((c.rgb[0]*n + rgb[0]) / (n+1)),
-        Math.round((c.rgb[1]*n + rgb[1]) / (n+1)),
-        Math.round((c.rgb[2]*n + rgb[2]) / (n+1)),
+    const mx = Math.max(rgb[0], rgb[1], rgb[2]);
+    const mn = Math.min(rgb[0], rgb[1], rgb[2]);
+    const sat = mx > 0 ? (mx - mn) / mx : 0;
+    if (sat > bestSat) { bestSat = sat; seed = rgb; }
+  }
+  centers.push([...seed]);
+  // Each subsequent seed = pixel farthest from all existing centers.
+  while (centers.length < n) {
+    let maxD = -1, next = flat[0];
+    for (const rgb of flat) {
+      let minD = Infinity;
+      for (const c of centers) { const d = _dist(c, rgb); if (d < minD) minD = d; }
+      if (minD > maxD) { maxD = minD; next = rgb; }
+    }
+    centers.push([...next]);
+  }
+
+  // K-means: iterate until stable (max 25 rounds).
+  const assignments = new Array(flat.length).fill(0);
+  for (let iter = 0; iter < 25; iter++) {
+    let changed = false;
+    for (let i = 0; i < flat.length; i++) {
+      let best = 0, bestD = Infinity;
+      for (let j = 0; j < n; j++) {
+        const d = _dist(centers[j], flat[i]);
+        if (d < bestD) { bestD = d; best = j; }
+      }
+      if (assignments[i] !== best) { assignments[i] = best; changed = true; }
+    }
+    if (!changed) break;
+    const sums = Array.from({ length: n }, () => [0, 0, 0, 0]);
+    for (let i = 0; i < flat.length; i++) {
+      const a = assignments[i];
+      sums[a][0] += flat[i][0]; sums[a][1] += flat[i][1];
+      sums[a][2] += flat[i][2]; sums[a][3]++;
+    }
+    for (let j = 0; j < n; j++) {
+      if (sums[j][3] > 0) centers[j] = [
+        Math.round(sums[j][0] / sums[j][3]),
+        Math.round(sums[j][1] / sums[j][3]),
+        Math.round(sums[j][2] / sums[j][3]),
       ];
-      c.n++;
-    } else {
-      clusters.push({ rgb, n: 1 });
     }
   }
 
-  // Merge obvious noise first (very similar clusters)
-  let p = _closestPair(clusters);
-  while (p.minD < 40) { _mergePair(clusters, p.mi, p.mj); p = _closestPair(clusters); }
-
-  // Force down to exactly `size` clusters — puzzle always has exactly N colors
-  while (clusters.length > size) {
-    const { mi, mj } = _closestPair(clusters);
-    _mergePair(clusters, mi, mj);
-  }
-
-  // Map each cell to nearest cluster index
+  // Map each cell to nearest center.
   const grid = raw.map(row => row.map(rgb => {
     let best = 0, bestD = Infinity;
-    clusters.forEach((c, i) => { const d = _dist(c.rgb, rgb); if (d < bestD) { bestD = d; best = i; } });
+    for (let j = 0; j < n; j++) {
+      const d = _dist(centers[j], rgb);
+      if (d < bestD) { bestD = d; best = j; }
+    }
     return best;
   }));
 
-  const colors = clusters.map(c => `rgb(${c.rgb[0]},${c.rgb[1]},${c.rgb[2]})`);
-  return { grid, colors, colorCount: clusters.length };
+  const colors = centers.map(c => `rgb(${c[0]},${c[1]},${c[2]})`);
+  return { grid, colors, colorCount: n };
 }
