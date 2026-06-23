@@ -68,6 +68,7 @@ const state = {
   xMarks: null,       // boolean[row][col] — X-marked cells detected in screenshot
   importedCats: [],   // [{row,col}] — cats already placed in the imported screenshot
   hintCells: [],      // [{row,col,role}] — cells highlighted by the active hint
+  explainStep: -1,    // which step was last explained (for two-level explain)
 };
 
 function createGrid(size) {
@@ -336,6 +337,7 @@ function updateStatus() {
 
 function clearHint() {
   state.hintCells = [];
+  state.explainStep = -1;
   const box = document.getElementById('hint-box');
   box.textContent = '';
   box.classList.remove('visible');
@@ -853,30 +855,34 @@ function ensureSolution() {
 function runHint() {
   if (!ensureSolution()) return;
   if (state.revealed >= state.size) {
-    // Already fully revealed — reset to hint mode
     state.revealed = 0;
     clearHint();
-    renderGrid();
     return;
   }
-
-  const { text, cells } = generateHintText(state.revealed);
   state.revealed++;
-  showHint(text, cells);
+  clearHint();
 }
 
 function runExplain() {
   if (!ensureSolution()) return;
   if (state.revealed >= state.size) {
-    // All cats shown — reset grid and explain from step 0
     state.revealed = 0;
-    renderGrid();
+    clearHint();
+    return;
   }
   try {
-    showHint(generateExplanation(state.revealed));
+    if (state.explainStep === state.revealed) {
+      // Second click on the same step — show full detailed reasoning
+      showHint(generateExplanation(state.revealed), []);
+    } else {
+      // First click — show tactical one-liner with cell highlights
+      const { text, cells } = generateHintText(state.revealed);
+      state.explainStep = state.revealed;
+      showHint(text, cells);
+    }
   } catch (e) {
-    showHint('Could not generate explanation — check the browser console.');
-    console.error('generateExplanation error:', e);
+    showHint('Could not generate explanation — check the browser console.', []);
+    console.error('runExplain error:', e);
   }
 }
 
