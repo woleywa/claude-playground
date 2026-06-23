@@ -287,16 +287,35 @@ input[type="range"]::-moz-range-thumb {
   to   { transform: scale(1);   opacity: 1; }
 }
 
+@keyframes hintpulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(232, 216, 96, 0.95), 0 0 12px rgba(232, 216, 96, 0.4); }
+  50%       { box-shadow: 0 0 0 5px rgba(232, 216, 96, 0.3),  0 0 24px rgba(232, 216, 96, 0.15); }
+}
+
+.cell.hint-cat {
+  animation: hintpulse 1.1s ease-in-out infinite;
+  z-index: 2;
+}
+
+.cell.hint-region {
+  box-shadow: inset 0 0 0 2px rgba(232, 216, 96, 0.55);
+}
+
+.cell.hint-locked {
+  box-shadow: inset 0 0 0 2px rgba(224, 96, 80, 0.55);
+}
+
 /* ── Hint box ── */
 
 .hint-box {
-  background: #2a2200;
+  background: #1e1e00;
   border: 1px solid #5a4e00;
   border-radius: 8px;
-  padding: 0.6rem 0.8rem;
-  font-size: 0.78rem;
-  line-height: 1.5;
-  color: #e0c840;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: #e8d860;
   white-space: pre-line;
   display: none;
 }

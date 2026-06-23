@@ -67,6 +67,7 @@ const state = {
   customColors: null, // rgb strings from screenshot, or null for palette mode
   xMarks: null,       // boolean[row][col] — X-marked cells detected in screenshot
   importedCats: [],   // [{row,col}] — cats already placed in the imported screenshot
+  hintCells: [],      // [{row,col,role}] — cells highlighted by the active hint
 };
 
 function createGrid(size) {
@@ -144,6 +145,9 @@ function renderGrid() {
         span.textContent = '✕';
         cell.appendChild(span);
       }
+
+      const hc = state.hintCells?.find(h => h.row === r && h.col === c);
+      if (hc) cell.classList.add(`hint-${hc.role}`);
 
       gridEl.appendChild(cell);
     }
@@ -331,15 +335,19 @@ function updateStatus() {
 // ── Hint box ───────────────────────────────────────────────────────────────
 
 function clearHint() {
+  state.hintCells = [];
   const box = document.getElementById('hint-box');
   box.textContent = '';
   box.classList.remove('visible');
+  renderGrid();
 }
 
-function showHint(text) {
+function showHint(text, cells = []) {
+  state.hintCells = cells;
   const box = document.getElementById('hint-box');
   box.textContent = text;
   box.classList.add('visible');
+  renderGrid();
 }
 
 function generateHintText(step) {
