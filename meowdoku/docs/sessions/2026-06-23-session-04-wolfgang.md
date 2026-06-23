@@ -62,7 +62,7 @@ The tactic engine would suggest the same deduction twice because applied X marks
 - `CLAUDE.md` (added "propose plan before coding" rule; strengthened direct-to-main rule)
 - `docs/architecture.md` (new)
 - `docs/sessions/2026-06-23-session-04-wolfgang.md` (this file)
-- `docs/tasks/hint-system.md` (updated)
+- `docs/features/hint-system.md` (updated)
 - `session-index.md` (updated)
 - `TASKS.md` (updated)
 

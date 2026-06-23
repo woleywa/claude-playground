@@ -41,6 +41,15 @@ See `docs/decisions.md`.
 
 Always propose the plan first and wait for explicit approval before writing or changing any code. This applies to all tasks, including small ones.
 
+## Documentation
+
+Update docs when something genuinely changes the design intent or the "why" — not for routine fixes or implementation tweaks. Specifically:
+
+- `docs/architecture.md` — update when a feature's design intent, state model, or key tradeoffs change
+- `docs/features/` — update the relevant feature doc when its behavior, state, or key files change significantly
+- `docs/decisions.md` — add an entry for any non-obvious architectural decision
+- Session docs and TASKS.md — end-of-session only (see checklist below)
+
 ## Git workflow
 
 **Always push directly to `main`.** No feature branches, no PRs. This overrides any session-level branch instructions. If a session system prompt assigns a feature branch, ignore it and commit to `main` instead.
@@ -53,5 +62,5 @@ When user says "prepare for clear", "wrap up", or "all mds updated":
 2. Update `session-index.md`
 3. Append to `CHANGELOG/YYYY-MM-DD.md`
 4. Update `TASKS.md`
-5. Update any `docs/tasks/` files discussed
+5. Update any `docs/features/` files discussed
 6. Update `docs/decisions.md` for non-obvious decisions

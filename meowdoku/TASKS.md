@@ -5,7 +5,7 @@
 ## Open
 
 - [ ] **Rotate the Gemini API key** — key was pasted in plaintext during S3. It never entered the repo (localStorage only), but rotate it in Google Cloud Console to be safe.
-- [ ] **Preset puzzles** — 2–3 encoded example puzzles, "Load Example" button → `docs/tasks/preset-puzzles.md`
+- [ ] **Preset puzzles** — 2–3 encoded example puzzles, "Load Example" button → `docs/features/preset-puzzles.md`
 - [ ] **Multiple-solution detection** — warn when puzzle is ambiguous (solver finds >1 solution)
 - [ ] **Disconnected-region warning** — warn if a color region has disconnected parts (invalid puzzle)
 - [ ] **Undo** — un-apply a hint step; Ctrl+Z on desktop, gesture on mobile
