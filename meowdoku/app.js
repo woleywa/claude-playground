@@ -363,7 +363,7 @@ function generateHintText() {
   const named = customColors ? namedCustomColors(customColors) : null;
   const cName = (ci) => named ? named[ci] : (COLORS[ci]?.name ?? `Color ${ci + 1}`);
 
-  // Build placed state from revealedRows + importedCats
+  // Build current placed state from revealedRows + importedCats
   const usedCols = new Set();
   const usedColors = new Set();
   const cats = [];
@@ -382,6 +382,7 @@ function generateHintText() {
     placedRowSet.add(r);
   }
 
+  // A cell is valid if: row unplaced, cell colored, col unused, color unused, not X-marked, no king-move clash
   const isValid = (r, c) => {
     if (placedRowSet.has(r)) return false;
     const ci = grid[r][c];
@@ -403,7 +404,19 @@ function generateHintText() {
     if (!usedColors.has(ci)) unplacedColors.push(ci);
   }
 
-  // Tactic 1 — region has exactly one valid cell → place cat
+  // Returns all k-element subsets of arr
+  function combinations(arr, k) {
+    if (k === 0) return [[]];
+    if (arr.length < k) return [];
+    const [first, ...rest] = arr;
+    return [
+      ...combinations(rest, k - 1).map(c => [first, ...c]),
+      ...combinations(rest, k),
+    ];
+  }
+
+  // ── Tactic 1 — Forced region ────────────────────────────────────────────
+  // A color region has exactly one valid cell left → place the cat there.
   for (const ci of unplacedColors) {
     const regionCells = allRegionCells(ci);
     const valid = regionCells.filter(({ row, col }) => isValid(row, col));
@@ -420,7 +433,8 @@ function generateHintText() {
     }
   }
 
-  // Tactic 2 — row has exactly one valid cell → place cat
+  // ── Tactic 2 — Forced row ───────────────────────────────────────────────
+  // A row has exactly one valid column → place the cat there.
   for (let r = 0; r < n; r++) {
     if (placedRowSet.has(r)) continue;
     const valid = [];
@@ -428,91 +442,393 @@ function generateHintText() {
     if (valid.length === 1) {
       const col = valid[0];
       const ci = grid[r][col];
-      const lockedCells = [];
-      for (let c = 0; c < n; c++) if (c !== col) lockedCells.push({ row: r, col: c, role: 'locked' });
+      const locked = [];
+      for (let c = 0; c < n; c++) if (c !== col) locked.push({ row: r, col: c, role: 'locked' });
       return {
         text: `Row ${r + 1} has only one valid column — place the ${cName(ci)} cat at col ${col + 1}.`,
-        cells: [{ row: r, col, role: 'cat' }, ...lockedCells],
+        cells: [{ row: r, col, role: 'cat' }, ...locked],
         action: { type: 'cat', row: r, col },
       };
     }
   }
 
-  // Tactic 3 — region confined to one row → mark other region cells as X
+  // ── Tactic 3 — Forced column ────────────────────────────────────────────
+  // A column has exactly one valid row → place the cat there.
+  for (let c = 0; c < n; c++) {
+    if (usedCols.has(c)) continue;
+    const valid = [];
+    for (let r = 0; r < n; r++) if (isValid(r, c)) valid.push(r);
+    if (valid.length === 1) {
+      const row = valid[0];
+      const ci = grid[row][c];
+      const locked = [];
+      for (let r = 0; r < n; r++) if (r !== row) locked.push({ row: r, col: c, role: 'locked' });
+      return {
+        text: `Column ${c + 1} has only one valid row — place the ${cName(ci)} cat at row ${row + 1}.`,
+        cells: [{ row, col: c, role: 'cat' }, ...locked],
+        action: { type: 'cat', row, col: c },
+      };
+    }
+  }
+
+  // ── Tactic 4 — Region confined to one row (+ Vector Isolation) ──────────
+  // All valid cells for a color fall in the same row.
+  // Action A: cross out the region's own cells outside that row.
+  // Action B (Vector Isolation): since that row is "owned" by this region,
+  //   cross out other colors' valid cells in that row too.
   for (const ci of unplacedColors) {
     const regionCells = allRegionCells(ci);
-    const validRows = new Set(
-      regionCells.filter(({ row, col }) => isValid(row, col)).map(({ row }) => row)
-    );
-    if (validRows.size === 1) {
-      const lr = [...validRows][0];
-      const validInRow = regionCells.filter(({ row, col }) => row === lr && isValid(row, col));
-      const toMark = regionCells.filter(({ row, col }) => row !== lr && !xMarks?.[row]?.[col]);
+    const validCells = regionCells.filter(({ row, col }) => isValid(row, col));
+    const validRows = new Set(validCells.map(({ row }) => row));
+    if (validRows.size !== 1) continue;
+    const lr = [...validRows][0];
+    const toMark = [];
+    for (const { row, col } of regionCells)
+      if (row !== lr && !xMarks?.[row]?.[col]) toMark.push({ row, col });
+    for (let c = 0; c < n; c++)
+      if (grid[lr][c] !== ci && isValid(lr, c) && !xMarks?.[lr]?.[c]) toMark.push({ row: lr, col: c });
+    if (toMark.length === 0) continue;
+    const validInRow = validCells.filter(({ row }) => row === lr);
+    const hasVectorElim = toMark.some(({ row }) => row === lr);
+    const text = hasVectorElim
+      ? `The ${cName(ci)} region can only go in row ${lr + 1} — it claims that row, so cross out other colors there and any region cells outside the row.`
+      : `The ${cName(ci)} region can only go in row ${lr + 1} — cross out the rest of the region.`;
+    return {
+      text,
+      cells: [
+        ...validInRow.map(c => ({ ...c, role: 'cat' })),
+        ...toMark.map(c => ({ ...c, role: c.row !== lr ? 'region' : 'locked' })),
+      ],
+      action: { type: 'xmarks', cells: toMark },
+    };
+  }
+
+  // ── Tactic 5 — Region confined to one column (+ Vector Isolation) ───────
+  // Mirror of Tactic 4 for columns.
+  for (const ci of unplacedColors) {
+    const regionCells = allRegionCells(ci);
+    const validCells = regionCells.filter(({ row, col }) => isValid(row, col));
+    const validCols = new Set(validCells.map(({ col }) => col));
+    if (validCols.size !== 1) continue;
+    const lc = [...validCols][0];
+    const toMark = [];
+    for (const { row, col } of regionCells)
+      if (col !== lc && !xMarks?.[row]?.[col]) toMark.push({ row, col });
+    for (let r = 0; r < n; r++)
+      if (grid[r][lc] !== ci && isValid(r, lc) && !xMarks?.[r]?.[lc]) toMark.push({ row: r, col: lc });
+    if (toMark.length === 0) continue;
+    const validInCol = validCells.filter(({ col }) => col === lc);
+    const hasVectorElim = toMark.some(({ col }) => col === lc);
+    const text = hasVectorElim
+      ? `The ${cName(ci)} region can only go in column ${lc + 1} — it claims that column, so cross out other colors there and any region cells outside the column.`
+      : `The ${cName(ci)} region can only go in column ${lc + 1} — cross out the rest of the region.`;
+    return {
+      text,
+      cells: [
+        ...validInCol.map(c => ({ ...c, role: 'cat' })),
+        ...toMark.map(c => ({ ...c, role: c.col !== lc ? 'region' : 'locked' })),
+      ],
+      action: { type: 'xmarks', cells: toMark },
+    };
+  }
+
+  // ── Tactic 6 — Set Saturation, rows (K = 2..4) ──────────────────────────
+  // If K regions are collectively confined to the same K rows, those rows are
+  // fully consumed by those regions. Cross out any other color's valid cells in
+  // those rows. K=2 is the classic "naked pair"; K=3,4 are the triple/quad.
+  for (let k = 2; k <= Math.min(4, unplacedColors.length); k++) {
+    const colorRowSets = unplacedColors.map(ci => ({
+      ci,
+      rows: new Set(allRegionCells(ci).filter(({ row, col }) => isValid(row, col)).map(({ row }) => row)),
+    }));
+    for (const combo of combinations(colorRowSets, k)) {
+      const union = new Set(combo.flatMap(({ rows }) => [...rows]));
+      if (union.size !== k) continue;
+      const colorSet = new Set(combo.map(({ ci }) => ci));
+      const rowList = [...union].sort((a, b) => a - b);
+      const toMark = [];
+      for (const r of rowList)
+        for (let c = 0; c < n; c++)
+          if (!colorSet.has(grid[r][c]) && isValid(r, c) && !xMarks?.[r]?.[c])
+            toMark.push({ row: r, col: c });
       if (toMark.length === 0) continue;
+      const names = combo.map(({ ci }) => cName(ci)).join(', ');
+      const rowStr = rowList.map(r => r + 1).join(', ');
       return {
-        text: `The ${cName(ci)} region can only go in row ${lr + 1} — cross out the rest of the region.`,
+        text: `${names} are all confined to rows ${rowStr} — those ${k} regions fill all ${k} cat slots in those rows, so cross out other colors there.`,
         cells: [
-          ...validInRow.map(c => ({ ...c, role: 'cat' })),
-          ...toMark.map(c => ({ ...c, role: 'region' })),
+          ...combo.flatMap(({ ci }) => allRegionCells(ci).filter(({ row, col }) => isValid(row, col)).map(c => ({ ...c, role: 'cat' }))),
+          ...toMark.map(c => ({ ...c, role: 'locked' })),
         ],
         action: { type: 'xmarks', cells: toMark },
       };
     }
   }
 
-  // Tactic 4 — region confined to one column → mark other region cells as X
-  for (const ci of unplacedColors) {
-    const regionCells = allRegionCells(ci);
-    const validCols = new Set(
-      regionCells.filter(({ row, col }) => isValid(row, col)).map(({ col }) => col)
-    );
-    if (validCols.size === 1) {
-      const lc = [...validCols][0];
-      const validInCol = regionCells.filter(({ row, col }) => col === lc && isValid(row, col));
-      const toMark = regionCells.filter(({ row, col }) => col !== lc && !xMarks?.[row]?.[col]);
+  // ── Tactic 7 — Set Saturation, columns (K = 2..4) ───────────────────────
+  // Mirror of Tactic 6 for columns.
+  for (let k = 2; k <= Math.min(4, unplacedColors.length); k++) {
+    const colorColSets = unplacedColors.map(ci => ({
+      ci,
+      cols: new Set(allRegionCells(ci).filter(({ row, col }) => isValid(row, col)).map(({ col }) => col)),
+    }));
+    for (const combo of combinations(colorColSets, k)) {
+      const union = new Set(combo.flatMap(({ cols }) => [...cols]));
+      if (union.size !== k) continue;
+      const colorSet = new Set(combo.map(({ ci }) => ci));
+      const colList = [...union].sort((a, b) => a - b);
+      const toMark = [];
+      for (const c of colList)
+        for (let r = 0; r < n; r++)
+          if (!colorSet.has(grid[r][c]) && isValid(r, c) && !xMarks?.[r]?.[c])
+            toMark.push({ row: r, col: c });
       if (toMark.length === 0) continue;
+      const names = combo.map(({ ci }) => cName(ci)).join(', ');
+      const colStr = colList.map(c => c + 1).join(', ');
       return {
-        text: `The ${cName(ci)} region can only go in column ${lc + 1} — cross out the rest of the region.`,
+        text: `${names} are all confined to columns ${colStr} — those ${k} regions fill all ${k} cat slots in those columns, so cross out other colors there.`,
         cells: [
-          ...validInCol.map(c => ({ ...c, role: 'cat' })),
-          ...toMark.map(c => ({ ...c, role: 'region' })),
+          ...combo.flatMap(({ ci }) => allRegionCells(ci).filter(({ row, col }) => isValid(row, col)).map(c => ({ ...c, role: 'cat' }))),
+          ...toMark.map(c => ({ ...c, role: 'locked' })),
         ],
         action: { type: 'xmarks', cells: toMark },
       };
     }
   }
 
-  // Tactic 5 — naked pair: 2 colors locked to same 2 rows → mark other colors X in those rows
-  for (let i = 0; i < unplacedColors.length; i++) {
-    for (let j = i + 1; j < unplacedColors.length; j++) {
-      const ciA = unplacedColors[i], ciB = unplacedColors[j];
-      const rowsA = new Set(allRegionCells(ciA).filter(({ row, col }) => isValid(row, col)).map(({ row }) => row));
-      const rowsB = new Set(allRegionCells(ciB).filter(({ row, col }) => isValid(row, col)).map(({ row }) => row));
-      if (rowsA.size === 2 && rowsB.size === 2 && [...rowsA].every(r => rowsB.has(r))) {
-        const [r1, r2] = [...rowsA].sort((a, b) => a - b);
-        const pairCells = [];
-        for (const ci of [ciA, ciB])
-          for (const { row, col } of allRegionCells(ci))
-            if (isValid(row, col)) pairCells.push({ row, col, role: 'cat' });
-        const toMark = [];
-        for (const r of [r1, r2])
-          for (let c = 0; c < n; c++)
-            if (isValid(r, c) && grid[r][c] !== ciA && grid[r][c] !== ciB && !xMarks?.[r]?.[c])
-              toMark.push({ row: r, col: c });
-        if (toMark.length === 0) continue;
+  // ── Tactic 8 — Line-Segment Halo ────────────────────────────────────────
+  // When a region's valid cells form a contiguous segment of 2–3 cells in one
+  // row or column, any external cell that is king-move adjacent to EVERY cell
+  // of that segment is blocked — whichever segment cell gets the cat, it will
+  // always touch that external cell.
+  for (const ci of unplacedColors) {
+    const validCells = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
+    if (validCells.length < 2 || validCells.length > 3) continue;
+    const segRows = new Set(validCells.map(({ row }) => row));
+    const segCols = new Set(validCells.map(({ col }) => col));
+    let segment = null;
+    if (segRows.size === 1) {
+      const r = [...segRows][0];
+      const sortedCols = validCells.map(({ col }) => col).sort((a, b) => a - b);
+      if (sortedCols[sortedCols.length - 1] - sortedCols[0] === sortedCols.length - 1)
+        segment = { dir: 'row', fixed: r, span: sortedCols };
+    } else if (segCols.size === 1) {
+      const c = [...segCols][0];
+      const sortedRows = validCells.map(({ row }) => row).sort((a, b) => a - b);
+      if (sortedRows[sortedRows.length - 1] - sortedRows[0] === sortedRows.length - 1)
+        segment = { dir: 'col', fixed: c, span: sortedRows };
+    }
+    if (!segment) continue;
+    const haloMap = new Map();
+    if (segment.dir === 'row') {
+      const r = segment.fixed;
+      for (let dr = -1; dr <= 1; dr += 2) {
+        const nr = r + dr;
+        if (nr < 0 || nr >= n) continue;
+        for (let c = 0; c < n; c++) {
+          if (segment.span.every(sc => Math.abs(c - sc) <= 1) && isValid(nr, c) && !xMarks?.[nr]?.[c])
+            haloMap.set(`${nr},${c}`, { row: nr, col: c });
+        }
+      }
+    } else {
+      const c = segment.fixed;
+      for (let dc = -1; dc <= 1; dc += 2) {
+        const nc = c + dc;
+        if (nc < 0 || nc >= n) continue;
+        for (let r = 0; r < n; r++) {
+          if (segment.span.every(sr => Math.abs(r - sr) <= 1) && isValid(r, nc) && !xMarks?.[r]?.[nc])
+            haloMap.set(`${r},${nc}`, { row: r, col: nc });
+        }
+      }
+    }
+    if (haloMap.size === 0) continue;
+    const toMark = [...haloMap.values()];
+    const segLen = segment.span.length;
+    const where = segment.dir === 'row'
+      ? `row ${segment.fixed + 1}, cols ${segment.span.map(c => c + 1).join('–')}`
+      : `column ${segment.fixed + 1}, rows ${segment.span.map(r => r + 1).join('–')}`;
+    return {
+      text: `The ${cName(ci)} region is squeezed into a ${segLen}-cell segment at ${where} — cells touching the whole segment are blocked by the king-move rule regardless of which cell gets the cat.`,
+      cells: [
+        ...validCells.map(c => ({ ...c, role: 'cat' })),
+        ...toMark.map(c => ({ ...c, role: 'locked' })),
+      ],
+      action: { type: 'xmarks', cells: toMark },
+    };
+  }
+
+  // ── Tactic 9 — Diagonal Pinch ───────────────────────────────────────────
+  // A region reduced to exactly two diagonally-adjacent cells forms a "pinch".
+  // Any cell orthogonally adjacent to BOTH candidates is always blocked —
+  // one of the two must get the cat, and either one would touch that cell.
+  for (const ci of unplacedColors) {
+    const validCells = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
+    if (validCells.length !== 2) continue;
+    const [a, b] = validCells;
+    if (Math.abs(a.row - b.row) !== 1 || Math.abs(a.col - b.col) !== 1) continue;
+    const toMark = [];
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (!isValid(r, c) || xMarks?.[r]?.[c]) continue;
+        const orthA = Math.abs(r - a.row) + Math.abs(c - a.col) === 1;
+        const orthB = Math.abs(r - b.row) + Math.abs(c - b.col) === 1;
+        if (orthA && orthB) toMark.push({ row: r, col: c });
+      }
+    }
+    if (toMark.length === 0) continue;
+    return {
+      text: `The ${cName(ci)} region is down to two diagonally-adjacent cells — any cell orthogonally touching both is blocked, since whichever one gets the cat will king-move into it.`,
+      cells: [
+        { ...a, role: 'cat' }, { ...b, role: 'cat' },
+        ...toMark.map(c => ({ ...c, role: 'locked' })),
+      ],
+      action: { type: 'xmarks', cells: toMark },
+    };
+  }
+
+  // ── Tactic 10 — Conjugate Pair ──────────────────────────────────────────
+  // When a row, column, or region is down to exactly 2 candidate cells, any
+  // external cell that would be king-move blocked by BOTH candidates can be
+  // eliminated — one of the two must be chosen, so both king-move zones apply.
+  // Check rows:
+  for (let r = 0; r < n; r++) {
+    if (placedRowSet.has(r)) continue;
+    const validCols = [];
+    for (let c = 0; c < n; c++) if (isValid(r, c)) validCols.push(c);
+    if (validCols.length !== 2) continue;
+    const [c1, c2] = validCols;
+    const toMark = [];
+    for (let rr = 0; rr < n; rr++) {
+      if (rr === r) continue;
+      for (let cc = 0; cc < n; cc++) {
+        if (!isValid(rr, cc) || xMarks?.[rr]?.[cc]) continue;
+        if (Math.abs(rr - r) <= 1 && Math.abs(cc - c1) <= 1 && Math.abs(cc - c2) <= 1)
+          toMark.push({ row: rr, col: cc });
+      }
+    }
+    if (toMark.length === 0) continue;
+    return {
+      text: `Row ${r + 1} has only two possible cells (cols ${c1 + 1} and ${c2 + 1}) — cells adjacent to both are blocked whichever one gets the cat.`,
+      cells: [
+        { row: r, col: c1, role: 'cat' }, { row: r, col: c2, role: 'cat' },
+        ...toMark.map(c => ({ ...c, role: 'locked' })),
+      ],
+      action: { type: 'xmarks', cells: toMark },
+    };
+  }
+  // Check columns:
+  for (let c = 0; c < n; c++) {
+    if (usedCols.has(c)) continue;
+    const validRows = [];
+    for (let r = 0; r < n; r++) if (isValid(r, c)) validRows.push(r);
+    if (validRows.length !== 2) continue;
+    const [r1, r2] = validRows;
+    const toMark = [];
+    for (let rr = 0; rr < n; rr++) {
+      for (let cc = 0; cc < n; cc++) {
+        if (cc === c || !isValid(rr, cc) || xMarks?.[rr]?.[cc]) continue;
+        if (Math.abs(cc - c) <= 1 && Math.abs(rr - r1) <= 1 && Math.abs(rr - r2) <= 1)
+          toMark.push({ row: rr, col: cc });
+      }
+    }
+    if (toMark.length === 0) continue;
+    return {
+      text: `Column ${c + 1} has only two possible rows (rows ${r1 + 1} and ${r2 + 1}) — cells adjacent to both are blocked whichever one gets the cat.`,
+      cells: [
+        { row: r1, col: c, role: 'cat' }, { row: r2, col: c, role: 'cat' },
+        ...toMark.map(c => ({ ...c, role: 'locked' })),
+      ],
+      action: { type: 'xmarks', cells: toMark },
+    };
+  }
+  // Check regions:
+  for (const ci of unplacedColors) {
+    const validCells = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
+    if (validCells.length !== 2) continue;
+    const [a, b] = validCells;
+    const toMark = [];
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if ((r === a.row && c === a.col) || (r === b.row && c === b.col)) continue;
+        if (!isValid(r, c) || xMarks?.[r]?.[c]) continue;
+        if (Math.abs(r - a.row) <= 1 && Math.abs(c - a.col) <= 1 &&
+            Math.abs(r - b.row) <= 1 && Math.abs(c - b.col) <= 1)
+          toMark.push({ row: r, col: c });
+      }
+    }
+    if (toMark.length === 0) continue;
+    return {
+      text: `The ${cName(ci)} region is down to two cells — any cell adjacent to both is blocked regardless of which one gets the cat.`,
+      cells: [
+        { ...a, role: 'cat' }, { ...b, role: 'cat' },
+        ...toMark.map(c => ({ ...c, role: 'locked' })),
+      ],
+      action: { type: 'xmarks', cells: toMark },
+    };
+  }
+
+  // ── Tactic 11 — Forward-check contradiction ──────────────────────────────
+  // For each valid cell, simulate placing a cat there and check whether any row,
+  // column, or color region immediately drops to zero valid cells. If it does,
+  // placing there is a logical contradiction — cross it out.
+  const simIsValid = (r, c, sCols, sColors, sCats) => {
+    if (sCats.some(p => p.row === r)) return false;
+    const ci = grid[r][c];
+    if (ci < 0 || sCols.has(c) || sColors.has(ci)) return false;
+    if (xMarks?.[r]?.[c]) return false;
+    return !sCats.some(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
+  };
+
+  for (let r = 0; r < n; r++) {
+    if (placedRowSet.has(r)) continue;
+    for (let c = 0; c < n; c++) {
+      if (!isValid(r, c)) continue;
+      const ci = grid[r][c];
+      const sCols = new Set([...usedCols, c]);
+      const sColors = new Set([...usedColors, ci]);
+      const sCats = [...cats, { row: r, col: c }];
+      const sPlaced = new Set([...placedRowSet, r]);
+      let why = null;
+      // Check all unplaced rows still have at least one valid cell
+      for (let rr = 0; rr < n && !why; rr++) {
+        if (sPlaced.has(rr)) continue;
+        let ok = false;
+        for (let cc = 0; cc < n && !ok; cc++)
+          if (simIsValid(rr, cc, sCols, sColors, sCats)) ok = true;
+        if (!ok) why = `row ${rr + 1} would have no valid placement`;
+      }
+      // Check all unplaced colors still have at least one valid cell
+      for (const ci2 of unplacedColors) {
+        if (why || ci2 === ci) continue;
+        let ok = false;
+        outer: for (let rr = 0; rr < n; rr++) {
+          if (sPlaced.has(rr)) continue;
+          for (let cc = 0; cc < n; cc++)
+            if (grid[rr][cc] === ci2 && simIsValid(rr, cc, sCols, sColors, sCats)) { ok = true; break outer; }
+        }
+        if (!ok) why = `the ${cName(ci2)} region would have no valid cell`;
+      }
+      // Check all unplaced columns still have at least one valid cell
+      for (let cc = 0; cc < n && !why; cc++) {
+        if (sCols.has(cc)) continue;
+        let ok = false;
+        for (let rr = 0; rr < n && !ok; rr++)
+          if (simIsValid(rr, cc, sCols, sColors, sCats)) ok = true;
+        if (!ok) why = `column ${cc + 1} would have no valid placement`;
+      }
+      if (why) {
         return {
-          text: `${cName(ciA)} and ${cName(ciB)} are both locked to rows ${r1 + 1} and ${r2 + 1} — cross out other colors in those rows.`,
-          cells: [
-            ...pairCells,
-            ...toMark.map(c => ({ ...c, role: 'locked' })),
-          ],
-          action: { type: 'xmarks', cells: toMark },
+          text: `Placing a cat at row ${r + 1}, col ${c + 1} causes a contradiction — ${why}. Cross it out.`,
+          cells: [{ row: r, col: c, role: 'locked' }],
+          action: { type: 'xmarks', cells: [{ row: r, col: c }] },
         };
       }
     }
   }
 
-  // Fallback — find next unplaced row and suggest placing its cat
+  // ── Fallback ─────────────────────────────────────────────────────────────
+  // No single deductive rule resolved this step. The solver knows the answer
+  // but the reasoning spans multiple interacting constraints simultaneously.
   const importedRowSet = new Set((importedCats || []).map(ic => ic.row));
   let fbRow = -1;
   for (let r = 0; r < n; r++) {
@@ -522,295 +838,10 @@ function generateHintText() {
   const fbCol = solution[fbRow];
   const fbCi = grid[fbRow][fbCol];
   return {
-    text: `Place the ${cName(fbCi)} cat at row ${fbRow + 1}, col ${fbCol + 1}.`,
+    text: `No single rule resolves this step — the solver determined the ${cName(fbCi)} cat belongs at row ${fbRow + 1}, col ${fbCol + 1}, but the reasoning requires tracking multiple constraints at once.`,
     cells: [{ row: fbRow, col: fbCol, role: 'cat' }],
     action: { type: 'cat', row: fbRow, col: fbCol },
   };
-}
-
-function generateExplanation(step) {
-  const { solution, grid, customColors, size: n, importedCats } = state;
-  const named = customColors ? namedCustomColors(customColors) : null;
-  const cName = (ci) => named ? named[ci] : (COLORS[ci]?.name ?? `Color ${ci + 1}`);
-
-  const usedCols = new Set();
-  const usedColors = new Set();
-  const cats = [];
-  const placedRowSet = new Set();
-  for (const ic of (importedCats || [])) {
-    usedCols.add(ic.col);
-    usedColors.add(grid[ic.row][ic.col]);
-    cats.push({ row: ic.row, col: ic.col });
-    placedRowSet.add(ic.row);
-  }
-  for (let r = 0; r < step; r++) {
-    if (placedRowSet.has(r)) continue;
-    usedCols.add(solution[r]);
-    usedColors.add(grid[r][solution[r]]);
-    cats.push({ row: r, col: solution[r] });
-    placedRowSet.add(r);
-  }
-
-  const xMarks = state.xMarks;
-
-  const isDirectValid = (row, col) => {
-    const ci = grid[row][col];
-    if (ci < 0 || placedRowSet.has(row)) return false;
-    if (usedCols.has(col) || usedColors.has(ci)) return false;
-    if (xMarks?.[row]?.[col]) return false;
-    return !cats.some(p => Math.abs(p.row - row) === 1 && Math.abs(p.col - col) <= 1);
-  };
-
-  // One-level forward check from a given simulation state (sCols/sColors/sCats are pre-placement)
-  const fwd1 = (r, c, sCols, sColors, sCats) => {
-    const ci = grid[r][c];
-    const simCols = new Set([...sCols, c]);
-    const simColors = new Set([...sColors, ci]);
-    const simCats = [...sCats, { row: r, col: c }];
-    for (let rr = 0; rr < n; rr++) {
-      if (simCats.some(p => p.row === rr)) continue;
-      let ok = false;
-      for (let cc = 0; cc < n && !ok; cc++) {
-        const rci = grid[rr][cc];
-        if (rci < 0 || simCols.has(cc) || simColors.has(rci)) continue;
-        if (xMarks?.[rr]?.[cc]) continue;
-        if (simCats.some(p => Math.abs(p.row - rr) === 1 && Math.abs(p.col - cc) <= 1)) continue;
-        ok = true;
-      }
-      if (!ok) return `would leave row ${rr + 1} with no valid placement`;
-    }
-    for (let ci2 = 0; ci2 < n; ci2++) {
-      if (simColors.has(ci2)) continue;
-      let ok = false;
-      done: for (let rr = 0; rr < n; rr++) {
-        if (simCats.some(p => p.row === rr)) continue;
-        for (let cc = 0; cc < n; cc++) {
-          if (grid[rr][cc] !== ci2 || simCols.has(cc)) continue;
-          if (xMarks?.[rr]?.[cc]) continue;
-          if (simCats.some(p => Math.abs(p.row - rr) === 1 && Math.abs(p.col - cc) <= 1)) continue;
-          ok = true; break done;
-        }
-      }
-      if (!ok) return `would leave the ${cName(ci2)} region with no valid placement`;
-    }
-    return null;
-  };
-
-  const forwardReason = (r, c) => fwd1(r, c, usedCols, usedColors, cats);
-
-  // Two-level forward check: after placing (r,c), check if any remaining row has
-  // ALL its direct-valid options failing a 1-level check (so it will be stranded)
-  const forwardReason2 = (r, c) => {
-    const d1 = forwardReason(r, c);
-    if (d1) return d1;
-    const ci = grid[r][c];
-    const simCols = new Set([...usedCols, c]);
-    const simColors = new Set([...usedColors, ci]);
-    const simCats = [...cats, { row: r, col: c }];
-    for (let rr = 0; rr < n; rr++) {
-      if (placedRowSet.has(rr) || rr === r) continue;
-      let hasForwardValid = false;
-      for (let cc = 0; cc < n; cc++) {
-        const rci = grid[rr][cc];
-        if (rci < 0 || simCols.has(cc) || simColors.has(rci)) continue;
-        if (simCats.some(p => Math.abs(p.row - rr) === 1 && Math.abs(p.col - cc) <= 1)) continue;
-        if (!fwd1(rr, cc, simCols, simColors, simCats)) { hasForwardValid = true; break; }
-      }
-      if (!hasForwardValid) return `would leave row ${rr + 1} with no valid continuation`;
-    }
-    return null;
-  };
-
-  // Confinement check (naked-pair tactic): after placing (r,c), if two unplaced
-  // regions each have valid cells in only ONE row (or column), and it's the SAME
-  // row (or column), they can't both fit — a human-readable conflict.
-  const confinementReason = (r, c) => {
-    const ci = grid[r][c];
-    const simCols = new Set([...usedCols, c]);
-    const simColors = new Set([...usedColors, ci]);
-    const simCats = [...cats, { row: r, col: c }];
-    const rowsFor = new Map(), colsFor = new Map();
-    for (let ci2 = 0; ci2 < n; ci2++) {
-      if (simColors.has(ci2)) continue;
-      const vRows = new Set(), vCols = new Set();
-      for (let rr = 0; rr < n; rr++) {
-        if (simCats.some(p => p.row === rr)) continue;
-        for (let cc = 0; cc < n; cc++) {
-          if (grid[rr][cc] !== ci2 || simCols.has(cc)) continue;
-          if (xMarks?.[rr]?.[cc]) continue;
-          if (simCats.some(p => Math.abs(p.row - rr) === 1 && Math.abs(p.col - cc) <= 1)) continue;
-          vRows.add(rr); vCols.add(cc);
-        }
-      }
-      if (vRows.size === 0) return null; // already caught by fwd1
-      rowsFor.set(ci2, vRows);
-      colsFor.set(ci2, vCols);
-    }
-    const rowLocked = [...rowsFor.entries()].filter(([, s]) => s.size === 1);
-    for (let i = 0; i < rowLocked.length - 1; i++)
-      for (let j = i + 1; j < rowLocked.length; j++)
-        if ([...rowLocked[i][1]][0] === [...rowLocked[j][1]][0])
-          return `would force ${cName(rowLocked[i][0])} and ${cName(rowLocked[j][0])} to compete for the same row`;
-    const colLocked = [...colsFor.entries()].filter(([, s]) => s.size === 1);
-    for (let i = 0; i < colLocked.length - 1; i++)
-      for (let j = i + 1; j < colLocked.length; j++)
-        if ([...colLocked[i][1]][0] === [...colLocked[j][1]][0])
-          return `would force ${cName(colLocked[i][0])} and ${cName(colLocked[j][0])} to compete for the same column`;
-    return null;
-  };
-
-  const blockReason = (r, c) => {
-    const cellCi = grid[r][c];
-    if (placedRowSet.has(r)) return `row ${r + 1} already solved`;
-    if (cellCi < 0) return 'uncolored cell';
-    if (xMarks?.[r]?.[c]) return 'already crossed out in the puzzle';
-    if (usedCols.has(c)) {
-      const occ = cats.find(p => p.col === c);
-      return `col ${c + 1} taken (cat in row ${occ ? occ.row + 1 : '?'})`;
-    }
-    if (usedColors.has(cellCi)) return `${cName(cellCi)} region already placed`;
-    const adj = cats.find(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
-    if (adj) return `diagonal to cat in row ${adj.row + 1}`;
-    return forwardReason2(r, c) ?? confinementReason(r, c) ?? 'no simple rule — solver verified';
-  };
-
-  // Priority 1: direct-constraint forced (no forward-check — clearest explanation)
-  let directForcedColor = -1, directForcedCell = null;
-  for (let dci = 0; dci < n; dci++) {
-    if (usedColors.has(dci)) continue;
-    const valid = [];
-    for (let r = 0; r < n; r++) {
-      if (placedRowSet.has(r)) continue;
-      for (let c = 0; c < n; c++)
-        if (grid[r][c] === dci && isDirectValid(r, c)) valid.push({ row: r, col: c });
-    }
-    if (valid.length === 1) { directForcedColor = dci; directForcedCell = valid[0]; break; }
-  }
-  let directForcedRow = -1, directForcedCol = -1;
-  if (directForcedColor < 0) {
-    for (let r = 0; r < n; r++) {
-      if (placedRowSet.has(r)) continue;
-      const valid = [];
-      for (let c = 0; c < n; c++) if (isDirectValid(r, c)) valid.push(c);
-      if (valid.length === 1) { directForcedRow = r; directForcedCol = valid[0]; break; }
-    }
-  }
-
-  // Priority 2: forward-check forced (1-level)
-  const rowValidFC = {};
-  for (let r = 0; r < n; r++) {
-    if (placedRowSet.has(r)) continue;
-    rowValidFC[r] = [];
-    for (let c = 0; c < n; c++) {
-      if (isDirectValid(r, c) && !forwardReason(r, c)) rowValidFC[r].push(c);
-    }
-  }
-  const colorValidFC = {};
-  for (let ci = 0; ci < n; ci++) {
-    if (usedColors.has(ci)) continue;
-    colorValidFC[ci] = [];
-    for (let r = 0; r < n; r++) {
-      if (placedRowSet.has(r)) continue;
-      for (let c = 0; c < n; c++)
-        if (grid[r][c] === ci && isDirectValid(r, c) && !forwardReason(r, c))
-          colorValidFC[ci].push({ row: r, col: c });
-    }
-  }
-  let bestRow = -1, bestRowCol = -1;
-  for (let r = 0; r < n; r++) {
-    if (placedRowSet.has(r)) continue;
-    if (rowValidFC[r]?.length === 1) { bestRow = r; bestRowCol = rowValidFC[r][0]; break; }
-  }
-  let bestColor = -1, bestColorCell = null;
-  for (let ci = 0; ci < n; ci++) {
-    if (colorValidFC[ci]?.length === 1) { bestColor = ci; bestColorCell = colorValidFC[ci][0]; break; }
-  }
-
-  const lines = [];
-
-  if (directForcedColor >= 0) {
-    const { row, col } = directForcedCell;
-    lines.push(`The ${cName(directForcedColor)} cat is forced — only one cell in this region isn't already blocked.`);
-    lines.push(`→ Place it at row ${row + 1}, col ${col + 1}.`);
-    const others = [];
-    for (let r = 0; r < n; r++)
-      for (let c = 0; c < n; c++)
-        if (grid[r][c] === directForcedColor && !(r === row && c === col))
-          others.push(`  • (${r + 1},${c + 1}): ${blockReason(r, c)}`);
-    if (others.length) { lines.push(''); lines.push(`Other ${cName(directForcedColor)} cells are blocked:`); others.forEach(l => lines.push(l)); }
-    return lines.join('\n');
-  }
-
-  if (directForcedRow >= 0) {
-    const c = directForcedCol;
-    const ci = grid[directForcedRow][c];
-    lines.push(`Row ${directForcedRow + 1} is forced — only col ${c + 1} is valid (${cName(ci)}).`);
-    lines.push('');
-    lines.push(`Other columns in row ${directForcedRow + 1} are blocked:`);
-    for (let cc = 0; cc < n; cc++) {
-      if (cc === c) continue;
-      lines.push(`  • Col ${cc + 1}: ${blockReason(directForcedRow, cc)}`);
-    }
-    return lines.join('\n');
-  }
-
-  if (bestColor >= 0) {
-    const { row, col } = bestColorCell;
-    lines.push(`The ${cName(bestColor)} cat is forced — only one valid cell in this region.`);
-    lines.push(`→ Place it at row ${row + 1}, col ${col + 1}.`);
-    const others = [];
-    for (let r = 0; r < n; r++)
-      for (let c = 0; c < n; c++)
-        if (grid[r][c] === bestColor && !(r === row && c === col))
-          others.push(`  • (${r + 1},${c + 1}): ${blockReason(r, c)}`);
-    if (others.length) { lines.push(''); lines.push(`Other ${cName(bestColor)} cells are blocked:`); others.forEach(l => lines.push(l)); }
-    return lines.join('\n');
-  }
-
-  if (bestRow >= 0) {
-    const c = bestRowCol;
-    const ci = grid[bestRow][c];
-    lines.push(`Row ${bestRow + 1} is forced — only col ${c + 1} is valid (${cName(ci)}).`);
-    lines.push('');
-    lines.push(`Other columns in row ${bestRow + 1} are blocked:`);
-    for (let cc = 0; cc < n; cc++) {
-      if (cc === c) continue;
-      lines.push(`  • Col ${cc + 1}: ${blockReason(bestRow, cc)}`);
-    }
-    return lines.join('\n');
-  }
-
-  // Fallback: pick the row with the most clearly-explainable blocked columns
-  const DEAD_END = 'no simple rule — solver verified';
-  let fbRow = -1, fbCol = -1;
-  let maxClear = -1;
-  for (let r = 0; r < n; r++) {
-    if (placedRowSet.has(r)) continue;
-    if (fbRow < 0) { fbRow = r; fbCol = solution[r]; }
-    let clear = 0;
-    for (let c = 0; c < n; c++) {
-      if (c === solution[r]) continue;
-      if (blockReason(r, c) !== DEAD_END) clear++;
-    }
-    if (clear > maxClear) { maxClear = clear; fbRow = r; fbCol = solution[r]; }
-  }
-  if (fbRow < 0) return 'All rows are already covered by placed cats.';
-  const row = fbRow, col = fbCol, ci = grid[fbRow][fbCol];
-  lines.push(`Next: row ${row + 1}, col ${col + 1} — ${cName(ci)}.`);
-  lines.push('');
-  lines.push(`Other columns in row ${row + 1} are blocked:`);
-  const reasonGroups = new Map();
-  for (let c = 0; c < n; c++) {
-    if (c === col) continue;
-    const reason = blockReason(row, c);
-    if (!reasonGroups.has(reason)) reasonGroups.set(reason, []);
-    reasonGroups.get(reason).push(c + 1);
-  }
-  for (const [reason, cols] of reasonGroups) {
-    const colStr = cols.length === 1 ? `Col ${cols[0]}` : `Cols ${cols.join(', ')}`;
-    lines.push(`  ✗ ${colStr}: ${reason}`);
-  }
-  return lines.join('\n');
 }
 
 // ── Image import ───────────────────────────────────────────────────────────
