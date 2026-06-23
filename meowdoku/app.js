@@ -14,6 +14,9 @@ const COLORS = [
 ];
 
 const ERASER = -1;
+const X_MARK_MODE = -2;
+
+let _xmarkDragIntent = null;
 
 function approxColorName(hex) {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
@@ -86,19 +89,25 @@ function renderPalette() {
   const palette = document.getElementById('palette');
   palette.innerHTML = '';
   palette.appendChild(makeSwatch(ERASER));
+  palette.appendChild(makeSwatch(X_MARK_MODE));
   for (let i = 0; i < state.size; i++) palette.appendChild(makeSwatch(i));
 }
 
 function makeSwatch(idx) {
   const isEraser = idx === ERASER;
+  const isXMark = idx === X_MARK_MODE;
   const btn = document.createElement('button');
   btn.className = 'swatch' +
     (isEraser ? ' eraser' : '') +
+    (isXMark ? ' xmark' : '') +
     (state.selectedColor === idx ? ' selected' : '');
 
   if (isEraser) {
     btn.textContent = '✕';
     btn.title = 'Erase';
+  } else if (isXMark) {
+    btn.textContent = '✕';
+    btn.title = 'Mark / unmark X';
   } else {
     btn.style.backgroundColor = cellColor(idx);
     btn.title = state.customColors ? namedCustomColors(state.customColors)[idx] : (COLORS[idx]?.name ?? '');
@@ -159,6 +168,18 @@ function renderGrid() {
 
 function paintCell(row, col) {
   const colorIdx = state.selectedColor;
+
+  if (colorIdx === X_MARK_MODE) {
+    if (!state.xMarks) {
+      state.xMarks = Array.from({ length: state.size }, () => new Array(state.size).fill(false));
+    }
+    if (_xmarkDragIntent === null) {
+      _xmarkDragIntent = state.xMarks[row][col] ? 'clear' : 'set';
+    }
+    state.xMarks[row][col] = (_xmarkDragIntent === 'set');
+    renderGrid();
+    return;
+  }
 
   // Painting after a solve — clear cats and re-render fully
   if (state.solution !== null) {
@@ -269,7 +290,7 @@ function bindEvents() {
     if (cell) paintCell(+cell.dataset.row, +cell.dataset.col);
   });
 
-  document.addEventListener('mouseup', () => { state.painting = false; });
+  document.addEventListener('mouseup', () => { state.painting = false; _xmarkDragIntent = null; });
 
   // Touch painting
   gridEl.addEventListener('touchstart', (e) => {
@@ -288,8 +309,8 @@ function bindEvents() {
     if (pos) paintCell(pos.row, pos.col);
   }, { passive: false });
 
-  document.addEventListener('touchend', () => { state.painting = false; });
-  document.addEventListener('touchcancel', () => { state.painting = false; });
+  document.addEventListener('touchend', () => { state.painting = false; _xmarkDragIntent = null; });
+  document.addEventListener('touchcancel', () => { state.painting = false; _xmarkDragIntent = null; });
 }
 
 // ── Status ─────────────────────────────────────────────────────────────────

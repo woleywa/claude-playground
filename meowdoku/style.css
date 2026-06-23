@@ -215,6 +215,12 @@ input[type="range"]::-moz-range-thumb {
   font-size: 16px;
 }
 
+.swatch.xmark {
+  background: #2a0a0a;
+  color: #e06050;
+  font-size: 16px;
+}
+
 .swatch.selected {
   border-color: var(--text);
   transform: scale(1.15);
