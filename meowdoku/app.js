@@ -344,65 +344,155 @@ function showHint(text) {
 
 function generateHintText(step) {
   const { solution, grid, customColors, size: n, importedCats } = state;
+  const named = customColors ? namedCustomColors(customColors) : null;
+  const cName = (ci) => named ? named[ci] : (COLORS[ci]?.name ?? `Color ${ci + 1}`);
 
-  // Find the next unplaced row (skip rows already covered by importedCats)
-  const importedRows = new Set((importedCats || []).map(ic => ic.row));
-  let nextRow = step;
-  while (nextRow < n && importedRows.has(nextRow)) nextRow++;
-  if (nextRow >= n) return 'All rows are already covered by placed cats.';
-
-  const row = nextRow;
-  const col = solution[row];
-  const colorIdx = grid[row][col];
-  const colorName = customColors ? namedCustomColors(customColors)[colorIdx] : (COLORS[colorIdx]?.name ?? `Color ${colorIdx + 1}`);
-
-  // Build placed state: solution rows 0..step-1 plus any imported cats
+  // Build placed state
   const usedCols = new Set();
-  const usedColorIdxs = new Set();
-  const placedRows = [];
+  const usedColors = new Set();
+  const cats = [];
   const placedRowSet = new Set();
   for (const ic of (importedCats || [])) {
     usedCols.add(ic.col);
-    usedColorIdxs.add(grid[ic.row][ic.col]);
-    placedRows.push({ row: ic.row, col: ic.col });
+    usedColors.add(grid[ic.row][ic.col]);
+    cats.push({ row: ic.row, col: ic.col });
     placedRowSet.add(ic.row);
   }
   for (let r = 0; r < step; r++) {
     if (placedRowSet.has(r)) continue;
     usedCols.add(solution[r]);
-    usedColorIdxs.add(grid[r][solution[r]]);
-    placedRows.push({ row: r, col: solution[r] });
+    usedColors.add(grid[r][solution[r]]);
+    cats.push({ row: r, col: solution[r] });
+    placedRowSet.add(r);
   }
-  const lastPlaced = placedRows.length > 0 ? placedRows[placedRows.length - 1] : null;
-  const prevCol = lastPlaced ? lastPlaced.col : -1;
 
-  // Categorise eliminated columns
-  const taken = [], colorPlaced = [], diag = [], deadEnd = [];
+  const isValid = (r, c) => {
+    if (placedRowSet.has(r)) return false;
+    const ci = grid[r][c];
+    if (ci < 0 || usedCols.has(c) || usedColors.has(ci)) return false;
+    return !cats.some(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
+  };
 
-  for (let c = 0; c < n; c++) {
-    if (c === col) continue;
-    const cellColorIdx = grid[row][c];
+  const allRegionCells = (ci) => {
+    const cells = [];
+    for (let r = 0; r < n; r++)
+      for (let c = 0; c < n; c++)
+        if (grid[r][c] === ci) cells.push({ row: r, col: c });
+    return cells;
+  };
 
-    if (usedCols.has(c)) {
-      const occupant = placedRows.find(p => p.col === c);
-      taken.push(`col ${c + 1} (row ${occupant ? occupant.row + 1 : '?'})`);
-    } else if (cellColorIdx < 0 || usedColorIdxs.has(cellColorIdx)) {
-      colorPlaced.push(`col ${c + 1}`);
-    } else if (prevCol >= 0 && Math.abs(c - prevCol) <= 1) {
-      diag.push(`col ${c + 1}`);
-    } else {
-      deadEnd.push(`col ${c + 1}`);
+  const unplacedColors = [];
+  for (let ci = 0; ci < n; ci++) {
+    if (!usedColors.has(ci)) unplacedColors.push(ci);
+  }
+
+  // Tactic 1 — region has exactly one valid cell
+  for (const ci of unplacedColors) {
+    const regionCells = allRegionCells(ci);
+    const valid = regionCells.filter(({ row, col }) => isValid(row, col));
+    if (valid.length === 1) {
+      const { row, col } = valid[0];
+      return {
+        text: `The ${cName(ci)} region has only one open cell — place the cat at row ${row + 1}, col ${col + 1}.`,
+        cells: [
+          { row, col, role: 'cat' },
+          ...regionCells.filter(c => !(c.row === row && c.col === col)).map(c => ({ ...c, role: 'region' })),
+        ],
+      };
     }
   }
 
-  const hintNum = step + 1 - [...importedRows].filter(r => r < step).length;
-  const lines = [`Hint ${hintNum}/${n - importedRows.size}: Row ${row + 1}, column ${col + 1} — ${colorName}`];
-  if (taken.length)      lines.push(`✗ Taken: ${taken.join(', ')}`);
-  if (colorPlaced.length) lines.push(`✗ Color already placed: ${colorPlaced.join(', ')}`);
-  if (diag.length)       lines.push(`✗ Diagonal to cat in row ${step}: ${diag.join(', ')}`);
-  if (deadEnd.length)    lines.push(`✗ No valid continuation: ${deadEnd.join(', ')}`);
+  // Tactic 2 — row has exactly one valid cell
+  for (let r = 0; r < n; r++) {
+    if (placedRowSet.has(r)) continue;
+    const valid = [];
+    for (let c = 0; c < n; c++) if (isValid(r, c)) valid.push(c);
+    if (valid.length === 1) {
+      const col = valid[0];
+      const ci = grid[r][col];
+      const rowCells = [];
+      for (let c = 0; c < n; c++) if (c !== col) rowCells.push({ row: r, col: c, role: 'locked' });
+      return {
+        text: `Row ${r + 1} has only one valid column — place the ${cName(ci)} cat at col ${col + 1}.`,
+        cells: [{ row: r, col, role: 'cat' }, ...rowCells],
+      };
+    }
+  }
 
-  return lines.join('\n');
+  // Tactic 3 — region confined to one row
+  for (const ci of unplacedColors) {
+    const regionCells = allRegionCells(ci);
+    const validRows = new Set(
+      regionCells.filter(({ row, col }) => isValid(row, col)).map(({ row }) => row)
+    );
+    if (validRows.size === 1) {
+      const lr = [...validRows][0];
+      const validInRow = regionCells.filter(({ row, col }) => row === lr && isValid(row, col));
+      const otherCells = regionCells.filter(({ row }) => row !== lr);
+      return {
+        text: `The ${cName(ci)} region can only go in row ${lr + 1} — no other row has a valid cell for it.`,
+        cells: [
+          ...validInRow.map(c => ({ ...c, role: 'cat' })),
+          ...otherCells.map(c => ({ ...c, role: 'region' })),
+        ],
+      };
+    }
+  }
+
+  // Tactic 4 — region confined to one column
+  for (const ci of unplacedColors) {
+    const regionCells = allRegionCells(ci);
+    const validCols = new Set(
+      regionCells.filter(({ row, col }) => isValid(row, col)).map(({ col }) => col)
+    );
+    if (validCols.size === 1) {
+      const lc = [...validCols][0];
+      const validInCol = regionCells.filter(({ row, col }) => col === lc && isValid(row, col));
+      const otherCells = regionCells.filter(({ col }) => col !== lc);
+      return {
+        text: `The ${cName(ci)} region can only go in column ${lc + 1} — that column is reserved for it.`,
+        cells: [
+          ...validInCol.map(c => ({ ...c, role: 'cat' })),
+          ...otherCells.map(c => ({ ...c, role: 'region' })),
+        ],
+      };
+    }
+  }
+
+  // Tactic 5 — naked pair: 2 colors locked to the same 2 rows
+  for (let i = 0; i < unplacedColors.length; i++) {
+    for (let j = i + 1; j < unplacedColors.length; j++) {
+      const ciA = unplacedColors[i], ciB = unplacedColors[j];
+      const rowsA = new Set(allRegionCells(ciA).filter(({ row, col }) => isValid(row, col)).map(({ row }) => row));
+      const rowsB = new Set(allRegionCells(ciB).filter(({ row, col }) => isValid(row, col)).map(({ row }) => row));
+      if (rowsA.size === 2 && rowsB.size === 2 && [...rowsA].every(r => rowsB.has(r))) {
+        const [r1, r2] = [...rowsA].sort((a, b) => a - b);
+        const pairCells = [];
+        for (const ci of [ciA, ciB])
+          for (const { row, col } of allRegionCells(ci))
+            if (isValid(row, col)) pairCells.push({ row, col, role: 'cat' });
+        return {
+          text: `${cName(ciA)} and ${cName(ciB)} are both locked to rows ${r1 + 1} and ${r2 + 1} — other colors must avoid those rows.`,
+          cells: pairCells,
+        };
+      }
+    }
+  }
+
+  // Fallback — show the next solution step
+  const importedRows = new Set((importedCats || []).map(ic => ic.row));
+  let nextRow = step;
+  while (nextRow < n && importedRows.has(nextRow)) nextRow++;
+  if (nextRow >= n) {
+    return { text: 'All rows are already covered by placed cats.', cells: [] };
+  }
+  const fbRow = nextRow;
+  const fbCol = solution[fbRow];
+  const fbCi = grid[fbRow][fbCol];
+  return {
+    text: `Place the ${cName(fbCi)} cat at row ${fbRow + 1}, col ${fbCol + 1}.`,
+    cells: [{ row: fbRow, col: fbCol, role: 'cat' }],
+  };
 }
 
 function generateExplanation(step) {
@@ -762,10 +852,9 @@ function runHint() {
     return;
   }
 
-  const hintText = generateHintText(state.revealed);
+  const { text, cells } = generateHintText(state.revealed);
   state.revealed++;
-  renderGrid();
-  showHint(hintText);
+  showHint(text, cells);
 }
 
 function runExplain() {
