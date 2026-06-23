@@ -70,6 +70,8 @@ These screenshots show the original app's Explain-equivalent — the design we'r
 
 Key principle from the original: text is always a **reason** (why), never just a destination (where).
 
+`docs/assets/our-explain-fallback-example.png` shows the old state before the tactic engine was built — "Place the Red 10 cat at row 1, col 7." with no reasoning. The 11-tactic engine now handles all the cases shown above; the fallback only fires when none of them apply.
+
 ---
 
 ## Key files

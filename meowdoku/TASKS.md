@@ -8,12 +8,13 @@
 - [ ] **Preset puzzles** — 2–3 encoded example puzzles, "Load Example" button → `docs/features/preset-puzzles.md`
 - [ ] **Multiple-solution detection** — warn when puzzle is ambiguous (solver finds >1 solution)
 - [ ] **Disconnected-region warning** — warn if a color region has disconnected parts (invalid puzzle)
-- [ ] **Undo** — un-apply a hint step; Ctrl+Z on desktop, gesture on mobile
-- [ ] **Naked pair for columns** — tactic 5 currently only detects row pairs; add column version
+- [ ] **Undo** — un-apply an Explain step; Ctrl+Z on desktop, gesture on mobile
 - [ ] **Explain progress indicator** — show how many deductions remain / solve progress
 
 ## Recently done
 
+- [x] **Explain tactic engine expanded** — 11 tactics: forced region/row/col, region confinement + vector isolation, set saturation K=2..4 rows+cols, line-segment halo, diagonal pinch, conjugate pair, forward-check contradiction; fallback text improved (Session 5)
+- [x] **`docs/features/hint-system.md` → `coaching-system.md`** — renamed, separated Hint and Explain into distinct sections (Session 5)
 - [x] **Explain/Apply progressive coaching flow** — tactical hints + Apply/Cancel buttons; each press gives one deduction; applied X marks accumulate (Session 4)
 - [x] **`revealedRows` Set** — replaced `revealed` counter; enables placing any specific cat in any order (Session 4)
 - [x] **`docs/architecture.md`** — living design doc: intent, decisions, lessons learned (Session 4)
