@@ -4,15 +4,21 @@
 
 ## Open
 
-- [ ] **Verify Solve-button text color** — set to `#111` in S3 but user reported it still looked light at session end (likely deploy/browser cache). Confirm after deploy; investigate specificity if it persists.
 - [ ] **Rotate the Gemini API key** — key was pasted in plaintext during S3. It never entered the repo (localStorage only), but rotate it in Google Cloud Console to be safe.
 - [ ] **Preset puzzles** — 2–3 encoded example puzzles, "Load Example" button → `docs/tasks/preset-puzzles.md`
 - [ ] **Multiple-solution detection** — warn when puzzle is ambiguous (solver finds >1 solution)
 - [ ] **Disconnected-region warning** — warn if a color region has disconnected parts (invalid puzzle)
-- [ ] **Undo** — paint history; Ctrl+Z on desktop, gesture on mobile
+- [ ] **Undo** — un-apply a hint step; Ctrl+Z on desktop, gesture on mobile
+- [ ] **Naked pair for columns** — tactic 5 currently only detects row pairs; add column version
+- [ ] **Explain progress indicator** — show how many deductions remain / solve progress
 
 ## Recently done
 
+- [x] **Explain/Apply progressive coaching flow** — tactical hints + Apply/Cancel buttons; each press gives one deduction; applied X marks accumulate (Session 4)
+- [x] **`revealedRows` Set** — replaced `revealed` counter; enables placing any specific cat in any order (Session 4)
+- [x] **`docs/architecture.md`** — living design doc: intent, decisions, lessons learned (Session 4)
+- [x] **Imported cat detection** — cats from screenshots shown permanently on grid (Session 4)
+- [x] **k-means++ color clustering** — replaced greedy nearest-neighbor; always returns exactly N clusters (Session 4)
 - [x] **Dark mode** — static dark theme across all UI (Session 3)
 - [x] **Tile grid + X marks** — gap/rounded-tile redesign, ✕ on solved/excluded cells (Session 3)
 - [x] **Detection fix: square-clamp bounds** — buttons below grid were inflating the box; now clamped to square (Session 3)
