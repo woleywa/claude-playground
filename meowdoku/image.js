@@ -432,7 +432,10 @@ function _extractGrid(img, bounds, size) {
       const bgRgb = _medRGB(pts);
       const bgBright = (bgRgb[0] + bgRgb[1] + bgRgb[2]) / 3;
       // Inner 3×3 (fractions 0.25, 0.50, 0.75) — safely inside any tile border/gap.
-      // Count pixels that are near-white AND significantly brighter than the background.
+      // Count pixels that look like an X mark overlay.
+      // White X: near-white and brighter than background.
+      // Red X: strongly red on a non-red background (incorrect-mark indicator in original app).
+      const bgIsReddish = bgRgb[0] > bgRgb[1] + 50 && bgRgb[0] > bgRgb[2] + 50;
       let xHits = 0;
       for (let fr = 0.25; fr < 0.8; fr += 0.25)
         for (let fc = 0.25; fc < 0.8; fc += 0.25) {
@@ -441,7 +444,9 @@ function _extractGrid(img, bounds, size) {
           const i = (py * iw + px) * 4;
           const r = data[i], g = data[i+1], b = data[i+2];
           const pBright = (r + g + b) / 3;
-          if (r > 190 && g > 190 && b > 190 && pBright > bgBright + 35) xHits++;
+          const isWhiteX = r > 190 && g > 190 && b > 190 && pBright > bgBright + 35;
+          const isRedX = !bgIsReddish && r > 160 && r > g * 1.6 && r > b * 1.6 && r > bgRgb[0] + 20;
+          if (isWhiteX || isRedX) xHits++;
         }
       // Cat detection: dark pixels significantly below background brightness.
       // Cat emojis have dark outlines/fur; plain colored cells and X marks do not.
