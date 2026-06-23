@@ -22,6 +22,15 @@ The coaching job is the most interesting and the most difficult to get right.
 
 The goal of coaching is to teach, not to spoil. The original Meowdoku app does this well: instead of just saying "put a cat here", it shows *why* — which rule applies, which cells are affected — and then lets the user choose to apply it or not.
 
+Reference screenshots from the original app (stored in `docs/assets/`):
+
+- `original-hint-excludes-region.png` — "Placing here excludes all cells in Dark Blue region — no cat can be placed"
+- `original-hint-naked-quad.png` — "4 colors share 4 rows — exclude other cells in these 4 rows"
+- `original-hint-contradiction.png` — "Placing here causes a contradiction — exclude this cell" (forward-checking)
+- `original-hint-column-no-valid.png` — "Column 6 will have no valid cell for a cat" (column candidate elimination)
+- `original-hint-incorrect-mark.png` — "You've incorrectly marked this cell! Tap to remove the X mark"
+- `our-explain-fallback-example.png` — our current fallback output: "Place the Red 10 cat at row 1, col 7." (no reasoning given — known quality gap)
+
 Two buttons:
 
 - **Hint** — silent, for when the user just wants to move forward. Reveals the next cat without any explanation.
