@@ -259,21 +259,21 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .cell.excluded span {
-  font-size: calc(0.44 * min(calc(100vw - 2rem), 480px) / var(--grid-size));
+  font-size: calc(0.55 * min(calc(100vw - 2rem), 480px) / var(--grid-size));
   pointer-events: none;
   display: block;
   line-height: 1;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.80);
   font-weight: 900;
   animation: xpop 0.12s ease-out;
 }
 
 .cell.imported-x span {
-  font-size: calc(0.38 * min(calc(100vw - 2rem), 480px) / var(--grid-size));
+  font-size: calc(0.55 * min(calc(100vw - 2rem), 480px) / var(--grid-size));
   pointer-events: none;
   display: block;
   line-height: 1;
-  color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.82);
   font-weight: 900;
 }
 
@@ -326,6 +326,59 @@ input[type="range"]::-moz-range-thumb {
 
 .status.ready {
   color: #5090d0;
+}
+
+/* ── Tactics guide ── */
+
+.tactics {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.tactics summary {
+  padding: 0.6rem 0.8rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #888;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.tactics summary::-webkit-details-marker { display: none; }
+
+.tactics[open] summary {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
+.tactics-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.tactic {
+  display: grid;
+  grid-template-columns: 1fr;
+  padding: 0.55rem 0.8rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  gap: 0.15rem;
+}
+
+.tactic:last-child { border-bottom: none; }
+
+.tactic-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.tactic-desc {
+  font-size: 0.73rem;
+  color: #777;
+  line-height: 1.45;
 }
 
 /* ── Screenshot modal ── */
