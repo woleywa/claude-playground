@@ -324,6 +324,23 @@ input[type="range"]::-moz-range-thumb {
   display: block;
 }
 
+.hint-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.hint-actions[hidden] {
+  display: none;
+}
+
+.btn-apply {
+  background: #e8a020;
+  color: #fff;
+  font-size: 0.85rem;
+  padding: 0.55rem 1rem;
+  flex: 1;
+}
+
 /* ── Status bar ── */
 
 .status {

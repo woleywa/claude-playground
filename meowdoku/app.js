@@ -62,13 +62,13 @@ const state = {
   grid: [],
   selectedColor: 0,
   painting: false,
-  solution: null,   // placed[row] = col, or null
-  revealed: 0,      // how many rows' cats are currently shown
-  customColors: null, // rgb strings from screenshot, or null for palette mode
-  xMarks: null,       // boolean[row][col] — X-marked cells detected in screenshot
-  importedCats: [],   // [{row,col}] — cats already placed in the imported screenshot
-  hintCells: [],      // [{row,col,role}] — cells highlighted by the active hint
-  explainStep: -1,    // which step was last explained (for two-level explain)
+  solution: null,      // placed[row] = col, or null
+  revealedRows: new Set(), // rows whose cats have been shown via Hint/Apply
+  customColors: null,  // rgb strings from screenshot, or null for palette mode
+  xMarks: null,        // boolean[row][col] — X marks (imported + user-applied via Explain)
+  importedCats: [],    // [{row,col}] — cats already placed in the imported screenshot
+  hintCells: [],       // [{row,col,role}] — cells highlighted by the active hint
+  pendingAction: null, // {type:'cat',row,col} | {type:'xmarks',cells:[{row,col}]}
 };
 
 function createGrid(size) {
@@ -127,8 +127,8 @@ function renderGrid() {
       if (color) cell.style.backgroundColor = color;
 
       const isImportedCat = state.importedCats.some(ic => ic.row === r && ic.col === c);
-      const isRevealedCat = state.solution !== null && r < state.revealed && state.solution[r] === c;
-      const isRevealedX   = state.solution !== null && r < state.revealed && state.solution[r] !== c;
+      const isRevealedCat = state.solution !== null && state.revealedRows.has(r) && state.solution[r] === c;
+      const isRevealedX   = state.solution !== null && state.revealedRows.has(r) && state.solution[r] !== c;
 
       if (isImportedCat || isRevealedCat) {
         cell.classList.add('cat');
@@ -163,7 +163,7 @@ function paintCell(row, col) {
   // Painting after a solve — clear cats and re-render fully
   if (state.solution !== null) {
     state.solution = null;
-    state.revealed = 0;
+    state.revealedRows.clear();
     clearHint();
     state.grid[row][col] = colorIdx;
     renderGrid();
@@ -203,7 +203,7 @@ function bindEvents() {
     document.getElementById('size-label').textContent = `${state.size} × ${state.size}`;
     state.grid = createGrid(state.size);
     state.solution = null;
-    state.revealed = 0;
+    state.revealedRows.clear();
     state.customColors = null;
     state.xMarks = null;
     if (state.selectedColor !== ERASER && state.selectedColor >= state.size) state.selectedColor = 0;
@@ -216,7 +216,7 @@ function bindEvents() {
   document.getElementById('clear-btn').addEventListener('click', () => {
     state.grid = createGrid(state.size);
     state.solution = null;
-    state.revealed = 0;
+    state.revealedRows.clear();
     state.customColors = null;
     state.xMarks = null;
     state.importedCats = [];
@@ -229,6 +229,8 @@ function bindEvents() {
   document.getElementById('solve-btn').addEventListener('click', runSolveAll);
   document.getElementById('hint-btn').addEventListener('click', runHint);
   document.getElementById('explain-btn').addEventListener('click', runExplain);
+  document.getElementById('apply-btn').addEventListener('click', runApply);
+  document.getElementById('cancel-btn').addEventListener('click', clearHint);
 
   document.getElementById('photo-btn').addEventListener('click', () => {
     openImagePicker(state.size, handleImageResult);
@@ -306,13 +308,14 @@ function countUncolored() {
 
 function updateStatus() {
   const el = document.getElementById('status');
-  if (state.solution !== null && state.revealed === state.size) {
+  const totalShown = state.revealedRows.size + (state.importedCats || []).length;
+  if (state.solution !== null && totalShown >= state.size) {
     el.textContent = '✓ Solved!';
     el.className = 'status success';
     return;
   }
-  if (state.solution !== null && state.revealed > 0) {
-    el.textContent = `Hint ${state.revealed}/${state.size}`;
+  if (state.solution !== null && state.revealedRows.size > 0) {
+    el.textContent = `${totalShown}/${state.size} placed`;
     el.className = 'status ready';
     return;
   }
@@ -337,27 +340,30 @@ function updateStatus() {
 
 function clearHint() {
   state.hintCells = [];
-  state.explainStep = -1;
+  state.pendingAction = null;
   const box = document.getElementById('hint-box');
   box.textContent = '';
   box.classList.remove('visible');
+  document.getElementById('hint-actions').hidden = true;
   renderGrid();
 }
 
-function showHint(text, cells = []) {
+function showHint(text, cells = [], action = null) {
   state.hintCells = cells;
+  state.pendingAction = action;
   const box = document.getElementById('hint-box');
   box.textContent = text;
   box.classList.add('visible');
+  document.getElementById('hint-actions').hidden = (action === null);
   renderGrid();
 }
 
-function generateHintText(step) {
-  const { solution, grid, customColors, size: n, importedCats } = state;
+function generateHintText() {
+  const { solution, grid, customColors, size: n, importedCats, revealedRows, xMarks } = state;
   const named = customColors ? namedCustomColors(customColors) : null;
   const cName = (ci) => named ? named[ci] : (COLORS[ci]?.name ?? `Color ${ci + 1}`);
 
-  // Build placed state
+  // Build placed state from revealedRows + importedCats
   const usedCols = new Set();
   const usedColors = new Set();
   const cats = [];
@@ -368,7 +374,7 @@ function generateHintText(step) {
     cats.push({ row: ic.row, col: ic.col });
     placedRowSet.add(ic.row);
   }
-  for (let r = 0; r < step; r++) {
+  for (const r of revealedRows) {
     if (placedRowSet.has(r)) continue;
     usedCols.add(solution[r]);
     usedColors.add(grid[r][solution[r]]);
@@ -380,6 +386,7 @@ function generateHintText(step) {
     if (placedRowSet.has(r)) return false;
     const ci = grid[r][c];
     if (ci < 0 || usedCols.has(c) || usedColors.has(ci)) return false;
+    if (xMarks?.[r]?.[c]) return false;
     return !cats.some(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
   };
 
@@ -396,7 +403,7 @@ function generateHintText(step) {
     if (!usedColors.has(ci)) unplacedColors.push(ci);
   }
 
-  // Tactic 1 — region has exactly one valid cell
+  // Tactic 1 — region has exactly one valid cell → place cat
   for (const ci of unplacedColors) {
     const regionCells = allRegionCells(ci);
     const valid = regionCells.filter(({ row, col }) => isValid(row, col));
@@ -408,11 +415,12 @@ function generateHintText(step) {
           { row, col, role: 'cat' },
           ...regionCells.filter(c => !(c.row === row && c.col === col)).map(c => ({ ...c, role: 'region' })),
         ],
+        action: { type: 'cat', row, col },
       };
     }
   }
 
-  // Tactic 2 — row has exactly one valid cell
+  // Tactic 2 — row has exactly one valid cell → place cat
   for (let r = 0; r < n; r++) {
     if (placedRowSet.has(r)) continue;
     const valid = [];
@@ -420,16 +428,17 @@ function generateHintText(step) {
     if (valid.length === 1) {
       const col = valid[0];
       const ci = grid[r][col];
-      const rowCells = [];
-      for (let c = 0; c < n; c++) if (c !== col) rowCells.push({ row: r, col: c, role: 'locked' });
+      const lockedCells = [];
+      for (let c = 0; c < n; c++) if (c !== col) lockedCells.push({ row: r, col: c, role: 'locked' });
       return {
         text: `Row ${r + 1} has only one valid column — place the ${cName(ci)} cat at col ${col + 1}.`,
-        cells: [{ row: r, col, role: 'cat' }, ...rowCells],
+        cells: [{ row: r, col, role: 'cat' }, ...lockedCells],
+        action: { type: 'cat', row: r, col },
       };
     }
   }
 
-  // Tactic 3 — region confined to one row
+  // Tactic 3 — region confined to one row → mark other region cells as X
   for (const ci of unplacedColors) {
     const regionCells = allRegionCells(ci);
     const validRows = new Set(
@@ -438,18 +447,20 @@ function generateHintText(step) {
     if (validRows.size === 1) {
       const lr = [...validRows][0];
       const validInRow = regionCells.filter(({ row, col }) => row === lr && isValid(row, col));
-      const otherCells = regionCells.filter(({ row }) => row !== lr);
+      const toMark = regionCells.filter(({ row, col }) => row !== lr && !xMarks?.[row]?.[col]);
+      if (toMark.length === 0) continue;
       return {
-        text: `The ${cName(ci)} region can only go in row ${lr + 1} — no other row has a valid cell for it.`,
+        text: `The ${cName(ci)} region can only go in row ${lr + 1} — cross out the rest of the region.`,
         cells: [
           ...validInRow.map(c => ({ ...c, role: 'cat' })),
-          ...otherCells.map(c => ({ ...c, role: 'region' })),
+          ...toMark.map(c => ({ ...c, role: 'region' })),
         ],
+        action: { type: 'xmarks', cells: toMark },
       };
     }
   }
 
-  // Tactic 4 — region confined to one column
+  // Tactic 4 — region confined to one column → mark other region cells as X
   for (const ci of unplacedColors) {
     const regionCells = allRegionCells(ci);
     const validCols = new Set(
@@ -458,18 +469,20 @@ function generateHintText(step) {
     if (validCols.size === 1) {
       const lc = [...validCols][0];
       const validInCol = regionCells.filter(({ row, col }) => col === lc && isValid(row, col));
-      const otherCells = regionCells.filter(({ col }) => col !== lc);
+      const toMark = regionCells.filter(({ row, col }) => col !== lc && !xMarks?.[row]?.[col]);
+      if (toMark.length === 0) continue;
       return {
-        text: `The ${cName(ci)} region can only go in column ${lc + 1} — that column is reserved for it.`,
+        text: `The ${cName(ci)} region can only go in column ${lc + 1} — cross out the rest of the region.`,
         cells: [
           ...validInCol.map(c => ({ ...c, role: 'cat' })),
-          ...otherCells.map(c => ({ ...c, role: 'region' })),
+          ...toMark.map(c => ({ ...c, role: 'region' })),
         ],
+        action: { type: 'xmarks', cells: toMark },
       };
     }
   }
 
-  // Tactic 5 — naked pair: 2 colors locked to the same 2 rows
+  // Tactic 5 — naked pair: 2 colors locked to same 2 rows → mark other colors X in those rows
   for (let i = 0; i < unplacedColors.length; i++) {
     for (let j = i + 1; j < unplacedColors.length; j++) {
       const ciA = unplacedColors[i], ciB = unplacedColors[j];
@@ -481,27 +494,37 @@ function generateHintText(step) {
         for (const ci of [ciA, ciB])
           for (const { row, col } of allRegionCells(ci))
             if (isValid(row, col)) pairCells.push({ row, col, role: 'cat' });
+        const toMark = [];
+        for (const r of [r1, r2])
+          for (let c = 0; c < n; c++)
+            if (isValid(r, c) && grid[r][c] !== ciA && grid[r][c] !== ciB && !xMarks?.[r]?.[c])
+              toMark.push({ row: r, col: c });
+        if (toMark.length === 0) continue;
         return {
-          text: `${cName(ciA)} and ${cName(ciB)} are both locked to rows ${r1 + 1} and ${r2 + 1} — other colors must avoid those rows.`,
-          cells: pairCells,
+          text: `${cName(ciA)} and ${cName(ciB)} are both locked to rows ${r1 + 1} and ${r2 + 1} — cross out other colors in those rows.`,
+          cells: [
+            ...pairCells,
+            ...toMark.map(c => ({ ...c, role: 'locked' })),
+          ],
+          action: { type: 'xmarks', cells: toMark },
         };
       }
     }
   }
 
-  // Fallback — show the next solution step
-  const importedRows = new Set((importedCats || []).map(ic => ic.row));
-  let nextRow = step;
-  while (nextRow < n && importedRows.has(nextRow)) nextRow++;
-  if (nextRow >= n) {
-    return { text: 'All rows are already covered by placed cats.', cells: [] };
+  // Fallback — find next unplaced row and suggest placing its cat
+  const importedRowSet = new Set((importedCats || []).map(ic => ic.row));
+  let fbRow = -1;
+  for (let r = 0; r < n; r++) {
+    if (!placedRowSet.has(r) && !importedRowSet.has(r)) { fbRow = r; break; }
   }
-  const fbRow = nextRow;
+  if (fbRow === -1) return { text: 'All cats are placed.', cells: [], action: null };
   const fbCol = solution[fbRow];
   const fbCi = grid[fbRow][fbCol];
   return {
     text: `Place the ${cName(fbCi)} cat at row ${fbRow + 1}, col ${fbCol + 1}.`,
     cells: [{ row: fbRow, col: fbCol, role: 'cat' }],
+    action: { type: 'cat', row: fbRow, col: fbCol },
   };
 }
 
@@ -807,7 +830,7 @@ function handleImageResult(result) {
   state.xMarks = result.xMarks || null;
   state.importedCats = result.cats || [];
   state.solution = null;
-  state.revealed = 0;
+  state.revealedRows.clear();
   clearHint();
   document.getElementById('ai-btn').hidden = false;
   if (result.colorCount < state.size) {
@@ -854,36 +877,54 @@ function ensureSolution() {
 
 function runHint() {
   if (!ensureSolution()) return;
-  if (state.revealed >= state.size) {
-    state.revealed = 0;
+  const totalShown = state.revealedRows.size + (state.importedCats || []).length;
+  if (totalShown >= state.size) {
+    state.revealedRows.clear();
     clearHint();
     return;
   }
-  state.revealed++;
+  // Reveal next row in sequential order
+  const importedRowSet = new Set((state.importedCats || []).map(ic => ic.row));
+  for (let r = 0; r < state.size; r++) {
+    if (!state.revealedRows.has(r) && !importedRowSet.has(r)) {
+      state.revealedRows.add(r);
+      break;
+    }
+  }
   clearHint();
 }
 
 function runExplain() {
   if (!ensureSolution()) return;
-  if (state.revealed >= state.size) {
-    state.revealed = 0;
+  const totalShown = state.revealedRows.size + (state.importedCats || []).length;
+  if (totalShown >= state.size) {
+    state.revealedRows.clear();
     clearHint();
     return;
   }
   try {
-    if (state.explainStep === state.revealed) {
-      // Second click on the same step — show full detailed reasoning
-      showHint(generateExplanation(state.revealed), []);
-    } else {
-      // First click — show tactical one-liner with cell highlights
-      const { text, cells } = generateHintText(state.revealed);
-      state.explainStep = state.revealed;
-      showHint(text, cells);
-    }
+    const { text, cells, action } = generateHintText();
+    showHint(text, cells, action);
   } catch (e) {
-    showHint('Could not generate explanation — check the browser console.', []);
+    showHint('Could not generate explanation.', [], null);
     console.error('runExplain error:', e);
   }
+}
+
+function runApply() {
+  const action = state.pendingAction;
+  if (!action) return;
+  if (action.type === 'cat') {
+    state.revealedRows.add(action.row);
+  } else if (action.type === 'xmarks') {
+    if (!state.xMarks) {
+      state.xMarks = Array.from({ length: state.size }, () => new Array(state.size).fill(false));
+    }
+    for (const { row, col } of action.cells) {
+      state.xMarks[row][col] = true;
+    }
+  }
+  clearHint();
 }
 
 function runSolveAll() {
@@ -911,7 +952,7 @@ function runSolveAll() {
     const result = solveMeowdoku(state.grid, state.size);
     if (result) {
       state.solution = result;
-      state.revealed = state.size;
+      for (let r = 0; r < state.size; r++) state.revealedRows.add(r);
       renderGrid();
     } else {
       statusEl.textContent = 'No solution found — check your color regions';
