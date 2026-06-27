@@ -448,19 +448,23 @@ function _extractGrid(img, bounds, size) {
           const isRedX = !bgIsReddish && r > 160 && r > g * 1.6 && r > b * 1.6 && r > bgRgb[0] + 20;
           if (isWhiteX || isRedX) xHits++;
         }
-      // Cat detection: dark pixels significantly below background brightness.
-      // Cat emojis have dark outlines/fur; plain colored cells and X marks do not.
+      // Cat detection: the cat emoji has genuinely near-black pixels (fur,
+      // outline, eyes). Plain colored cells and X-mark overlays never approach
+      // black — their darkest pixels stay well above ~130. So sample densely and
+      // count near-black pixels; cats register dozens, everything else zero.
+      // (A sparse 3×3 sample used to miss cats whose dark fur fell between points.)
       let catHits = 0;
-      for (let fr = 0.25; fr < 0.8; fr += 0.25)
-        for (let fc = 0.25; fc < 0.8; fc += 0.25) {
+      for (let fr = 0.12; fr <= 0.88; fr += 0.095)
+        for (let fc = 0.12; fc <= 0.88; fc += 0.095) {
           const px = Math.min(canvas.width - 1, Math.floor(x + (col + fc) * cw));
           const py = Math.min(canvas.height - 1, Math.floor(y + (row + fr) * ch));
           const i = (py * iw + px) * 4;
-          const r2 = data[i], g2 = data[i+1], b2 = data[i+2];
-          const pBright = (r2 + g2 + b2) / 3;
-          if (pBright < bgBright - 55 && pBright < 130) catHits++;
+          const pBright = (data[i] + data[i+1] + data[i+2]) / 3;
+          if (pBright < 95) catHits++;
         }
-      return { rgb: bgRgb, hasX: xHits >= 2, hasCat: catHits >= 3 };
+      const hasCat = catHits >= 4;
+      // A cat's white face patch can read like a white X — never both.
+      return { rgb: bgRgb, hasX: !hasCat && xHits >= 2, hasCat };
     })
   );
 
