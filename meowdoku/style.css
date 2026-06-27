@@ -221,6 +221,11 @@ input[type="range"]::-moz-range-thumb {
   font-size: 16px;
 }
 
+.swatch.catmode {
+  background: #1a2a1a;
+  font-size: 16px;
+}
+
 .swatch.selected {
   border-color: var(--text);
   transform: scale(1.15);

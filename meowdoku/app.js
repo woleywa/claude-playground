@@ -15,13 +15,27 @@ const COLORS = [
 
 const ERASER = -1;
 const X_MARK_MODE = -2;
+const CAT_MODE = -3;
 
 let _xmarkDragIntent = null;
+let _catGestureCells = null;
 
-function approxColorName(hex) {
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
+// Parse "#rrggbb", "rgb(r,g,b)", or "rgba(r,g,b,a)" into [r,g,b] (0–255), or null.
+function parseColorRGB(str) {
+  if (typeof str !== 'string') return null;
+  const m = str.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (m) return [+m[1], +m[2], +m[3]];
+  const h = str.replace(/^#/, '');
+  if (/^[0-9a-f]{6}$/i.test(h)) {
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+  return null;
+}
+
+function approxColorName(color) {
+  const rgb = parseColorRGB(color);
+  if (!rgb) return 'Color';
+  const r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
   const l = (max + min) / 2;
   const s = max === min ? 0 : (max - min) / (1 - Math.abs(2 * l - 1));
@@ -34,7 +48,7 @@ function approxColorName(hex) {
     else h = (r - g) / d + 4;
     h = h / 6 * 360;
   }
-  if (h >= 15 && h < 50 && l < 0.4) return 'Brown';
+  if (h >= 15 && h < 50 && l < 0.52) return 'Brown';
   if (h < 15 || h >= 345) return 'Red';
   if (h < 38) return 'Orange';
   if (h < 65) return 'Yellow';
@@ -90,16 +104,19 @@ function renderPalette() {
   palette.innerHTML = '';
   palette.appendChild(makeSwatch(ERASER));
   palette.appendChild(makeSwatch(X_MARK_MODE));
+  palette.appendChild(makeSwatch(CAT_MODE));
   for (let i = 0; i < state.size; i++) palette.appendChild(makeSwatch(i));
 }
 
 function makeSwatch(idx) {
   const isEraser = idx === ERASER;
   const isXMark = idx === X_MARK_MODE;
+  const isCat = idx === CAT_MODE;
   const btn = document.createElement('button');
   btn.className = 'swatch' +
     (isEraser ? ' eraser' : '') +
     (isXMark ? ' xmark' : '') +
+    (isCat ? ' catmode' : '') +
     (state.selectedColor === idx ? ' selected' : '');
 
   if (isEraser) {
@@ -108,6 +125,9 @@ function makeSwatch(idx) {
   } else if (isXMark) {
     btn.textContent = '✕';
     btn.title = 'Mark / unmark X';
+  } else if (isCat) {
+    btn.textContent = '🐱';
+    btn.title = 'Place / remove cat';
   } else {
     btn.style.backgroundColor = cellColor(idx);
     btn.title = state.customColors ? namedCustomColors(state.customColors)[idx] : (COLORS[idx]?.name ?? '');
@@ -177,6 +197,44 @@ function paintCell(row, col) {
       _xmarkDragIntent = state.xMarks[row][col] ? 'clear' : 'set';
     }
     state.xMarks[row][col] = (_xmarkDragIntent === 'set');
+    renderGrid();
+    return;
+  }
+
+  if (colorIdx === CAT_MODE) {
+    // Toggle a hand-placed cat. Guard so a drag toggles each cell at most once.
+    const key = `${row},${col}`;
+    if (!_catGestureCells) _catGestureCells = new Set();
+    if (_catGestureCells.has(key)) return;
+    _catGestureCells.add(key);
+    // A placed solution is no longer valid once the board changes by hand.
+    if (state.solution !== null) {
+      state.solution = null;
+      state.revealedRows.clear();
+      clearHint();
+    }
+    const i = state.importedCats.findIndex(c => c.row === row && c.col === col);
+    if (i >= 0) {
+      state.importedCats.splice(i, 1);
+    } else {
+      state.importedCats.push({ row, col });
+      if (state.xMarks?.[row]?.[col]) state.xMarks[row][col] = false;
+    }
+    renderGrid();
+    return;
+  }
+
+  if (colorIdx === ERASER) {
+    // Erase clears color, any hand-placed cat, and any X mark on the cell.
+    if (state.solution !== null) {
+      state.solution = null;
+      state.revealedRows.clear();
+      clearHint();
+    }
+    state.grid[row][col] = -1;
+    const i = state.importedCats.findIndex(c => c.row === row && c.col === col);
+    if (i >= 0) state.importedCats.splice(i, 1);
+    if (state.xMarks?.[row]?.[col]) state.xMarks[row][col] = false;
     renderGrid();
     return;
   }
@@ -290,7 +348,7 @@ function bindEvents() {
     if (cell) paintCell(+cell.dataset.row, +cell.dataset.col);
   });
 
-  document.addEventListener('mouseup', () => { state.painting = false; _xmarkDragIntent = null; });
+  document.addEventListener('mouseup', () => { state.painting = false; _xmarkDragIntent = null; _catGestureCells = null; });
 
   // Touch painting
   gridEl.addEventListener('touchstart', (e) => {
@@ -309,8 +367,8 @@ function bindEvents() {
     if (pos) paintCell(pos.row, pos.col);
   }, { passive: false });
 
-  document.addEventListener('touchend', () => { state.painting = false; _xmarkDragIntent = null; });
-  document.addEventListener('touchcancel', () => { state.painting = false; _xmarkDragIntent = null; });
+  document.addEventListener('touchend', () => { state.painting = false; _xmarkDragIntent = null; _catGestureCells = null; });
+  document.addEventListener('touchcancel', () => { state.painting = false; _xmarkDragIntent = null; _catGestureCells = null; });
 }
 
 // ── Status ─────────────────────────────────────────────────────────────────
@@ -963,11 +1021,32 @@ function runExplain() {
   }
 }
 
+// Mark X on every cell a cat at (row, col) eliminates: its row, column,
+// color region, and the 8 king-move neighbours (but not the cat cell itself).
+function markCatEliminations(row, col) {
+  if (!state.xMarks) {
+    state.xMarks = Array.from({ length: state.size }, () => new Array(state.size).fill(false));
+  }
+  const n = state.size;
+  const ci = state.grid[row][col];
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (r === row && c === col) continue;
+      const sameRow = r === row;
+      const sameCol = c === col;
+      const sameColor = ci >= 0 && state.grid[r][c] === ci;
+      const touching = Math.abs(r - row) <= 1 && Math.abs(c - col) <= 1;
+      if (sameRow || sameCol || sameColor || touching) state.xMarks[r][c] = true;
+    }
+  }
+}
+
 function runApply() {
   const action = state.pendingAction;
   if (!action) return;
   if (action.type === 'cat') {
     state.revealedRows.add(action.row);
+    markCatEliminations(action.row, action.col);
   } else if (action.type === 'xmarks') {
     if (!state.xMarks) {
       state.xMarks = Array.from({ length: state.size }, () => new Array(state.size).fill(false));
