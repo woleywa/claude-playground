@@ -381,14 +381,17 @@ function _detectGridSize(data, iw, ih, b) {
     return tot ? cnt / tot : 0;
   };
 
-  // Count runs of "tile" (fraction ≥ 0.4) separated by gaps (cream background)
+  // Count runs of "tile" separated by gaps (cream background). The gaps between
+  // tiles read as ~0 colorful, while a heavily X-marked tile row can dip as low
+  // as ~0.29 (white X strokes aren't colorful). A 0.2 threshold sits safely
+  // between the two so X marks don't fragment a single row into several bands.
   const bands = (frac, lo, len) => {
     const stepOut = Math.max(1, Math.round(len / 500));
     let count = 0, inside = false;
     for (let p = lo; p < lo + len; p += stepOut) {
       const v = frac(p);
-      if (v >= 0.4 && !inside) { count++; inside = true; }
-      else if (v < 0.4) inside = false;
+      if (v >= 0.2 && !inside) { count++; inside = true; }
+      else if (v < 0.2) inside = false;
     }
     return count;
   };

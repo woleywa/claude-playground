@@ -905,6 +905,78 @@ function generateHintText() {
     }
   }
 
+  // ── Tactic 12 — Propagation contradiction (depth-2+) ─────────────────────
+  // Tactic 11 only checks for an *immediate* empty region after one hypothetical
+  // cat. This goes deeper: hypothesise a cat, then keep placing any cat that
+  // becomes forced (a row/column/region down to a single valid cell). If that
+  // forced chain ever empties some row/column/region, the original hypothesis is
+  // impossible — cross it out. This is the "two-step" deduction the original app
+  // shows ("…forces a cat here, after which the Orange region has no valid cell").
+  const propagate = (r0, c0) => {
+    const ci0 = grid[r0][c0];
+    const sCols = new Set([...usedCols, c0]);
+    const sColors = new Set([...usedColors, ci0]);
+    const sCats = [...cats, { row: r0, col: c0 }];
+    const sPlaced = new Set([...placedRowSet, r0]);
+    const chain = [];
+    for (let guard = 0; guard < n * n; guard++) {
+      let forced = null, why = null;
+      // Rows
+      for (let rr = 0; rr < n && !why; rr++) {
+        if (sPlaced.has(rr)) continue;
+        const valids = [];
+        for (let cc = 0; cc < n; cc++) if (simIsValid(rr, cc, sCols, sColors, sCats)) valids.push(cc);
+        if (valids.length === 0) why = `row ${rr + 1} would have no valid cell`;
+        else if (valids.length === 1 && !forced) forced = { row: rr, col: valids[0] };
+      }
+      // Columns
+      for (let cc = 0; cc < n && !why; cc++) {
+        if (sCols.has(cc)) continue;
+        const valids = [];
+        for (let rr = 0; rr < n; rr++) if (simIsValid(rr, cc, sCols, sColors, sCats)) valids.push(rr);
+        if (valids.length === 0) why = `column ${cc + 1} would have no valid cell`;
+        else if (valids.length === 1 && !forced) forced = { row: valids[0], col: cc };
+      }
+      // Color regions
+      for (const ci2 of unplacedColors) {
+        if (why || sColors.has(ci2)) continue;
+        const valids = [];
+        for (let rr = 0; rr < n; rr++)
+          for (let cc = 0; cc < n; cc++)
+            if (grid[rr][cc] === ci2 && simIsValid(rr, cc, sCols, sColors, sCats)) valids.push({ row: rr, col: cc });
+        if (valids.length === 0) why = `the ${cName(ci2)} region would have no valid cell`;
+        else if (valids.length === 1 && !forced) forced = valids[0];
+      }
+      if (why) return { why, chain };
+      if (!forced) return null;          // stable, no contradiction reachable this way
+      sCats.push(forced); sCols.add(forced.col);
+      sColors.add(grid[forced.row][forced.col]); sPlaced.add(forced.row);
+      chain.push(forced);
+    }
+    return null;
+  };
+
+  for (let r = 0; r < n; r++) {
+    if (placedRowSet.has(r)) continue;
+    for (let c = 0; c < n; c++) {
+      if (!isValid(r, c)) continue;
+      const res = propagate(r, c);
+      if (!res || res.chain.length === 0) continue;  // depth-1 cases handled by Tactic 11
+      const first = res.chain[0];
+      const chainNote = res.chain.length === 1
+        ? `forces the cat at row ${first.row + 1}, col ${first.col + 1}`
+        : `forces a chain of ${res.chain.length} placements`;
+      return {
+        text: `Placing a cat at row ${r + 1}, col ${c + 1} ${chainNote} — after which ${res.why}. That's a contradiction, so cross out row ${r + 1}, col ${c + 1}.`,
+        cells: [
+          { row: r, col: c, role: 'locked' },
+          ...res.chain.map(p => ({ ...p, role: 'cat' })),
+        ],
+        action: { type: 'xmarks', cells: [{ row: r, col: c }] },
+      };
+    }
+  }
+
   // ── Fallback ─────────────────────────────────────────────────────────────
   // No single deductive rule resolved this step. The solver knows the answer
   // but the reasoning spans multiple interacting constraints simultaneously.
