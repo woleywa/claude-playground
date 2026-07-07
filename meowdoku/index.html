@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Meowdoku Solver</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
   <div class="app">
@@ -56,15 +56,15 @@
         </div>
         <div class="tactic">
           <span class="tactic-name">📏 Line Lock</span>
-          <span class="tactic-desc">If all of a color's open cells sit in one row (or column), that color owns the line — cross every other color out of it.</span>
+          <span class="tactic-desc">If all of a color's open cells sit in one line, that color owns the line — cross every other color out of it. Works in reverse too: if all of a line's open cells are one color, that color's cat is in this line — cross that color out everywhere else.</span>
         </div>
         <div class="tactic">
           <span class="tactic-name">👥 Crowding</span>
-          <span class="tactic-desc">If K colors can only fit in the same K rows (or columns), those lines are fully booked — cross every other color out of them. (K=2 is the classic "naked pair".)</span>
+          <span class="tactic-desc">If K colors can only fit in the same K lines, those lines are fully booked — cross every other color out of them. (K=2 is the classic "naked pair".) Works in reverse too: if K lines can only be reached by K colors combined, those colors must place inside those lines — cross their other cells out everywhere else.</span>
         </div>
         <div class="tactic">
-          <span class="tactic-name">🤏 Squeeze</span>
-          <span class="tactic-desc">When a row, column, or color is down to just two or three candidates, any cell touching all of them is doomed — whichever one wins, it lands next door.</span>
+          <span class="tactic-name">🤏 Shared Shadow</span>
+          <span class="tactic-desc">Look at ALL remaining candidates for a row, column, or color. If every single one of them would eliminate a certain cell — through its row, column, color, or by touching it — that cell is dead no matter which candidate wins.</span>
         </div>
         <div class="tactic">
           <span class="tactic-name">🤔 What-If</span>
@@ -95,6 +95,6 @@
 
   <script src="solver.js?v=12"></script>
   <script src="image.js?v=19"></script>
-  <script src="app.js?v=23"></script>
+  <script src="app.js?v=24"></script>
 </body>
 </html>

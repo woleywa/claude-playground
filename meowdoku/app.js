@@ -429,12 +429,20 @@ function clearHint() {
 
 // Every lesson has three parts: Name (the technique), Rule (the general
 // principle — what you actually learn), Here (how it applies to this board).
+// A dimmed "checked" trail above the name shows which simpler techniques were
+// tried first and found nothing — so the player learns the checking order too.
 function showHint(hint, cells = [], action = null) {
-  const { name, rule, here } = hint;
+  const { name, rule, here, checked } = hint;
   state.hintCells = cells;
   state.pendingAction = action;
   const box = document.getElementById('hint-box');
   box.innerHTML = '';
+  if (checked && checked.length > 0) {
+    const checkedEl = document.createElement('div');
+    checkedEl.className = 'hint-checked';
+    checkedEl.textContent = `Checked first, no luck: ${checked.join(' → ')}`;
+    box.appendChild(checkedEl);
+  }
   const nameEl = document.createElement('div');
   nameEl.className = 'hint-name';
   nameEl.textContent = name;
@@ -460,7 +468,7 @@ function showHint(hint, cells = [], action = null) {
 const T_LASTSPOT = '🎯 Last Spot';
 const T_LINELOCK = '📏 Line Lock';
 const T_CROWDING = '👥 Crowding';
-const T_SQUEEZE = '🤏 Squeeze';
+const T_SQUEEZE = '🤏 Shared Shadow';
 const T_WHATIF = '🤔 What-If';
 const T_BEYOND = '🧩 Beyond the Rules';
 
@@ -520,6 +528,12 @@ function generateHintText() {
       ...combinations(rest, k),
     ];
   }
+
+  // Trail of techniques whose full scan found nothing before the one that
+  // fires — shown dimmed above the lesson so the player learns what to check
+  // (and in what order) even when the simple stuff doesn't apply here.
+  const checked = [];
+  const noteChecked = (name) => { if (checked[checked.length - 1] !== name) checked.push(name); };
 
   // ── Last Spot — by color region ─────────────────────────────────────────
   // Each color gets exactly one cat. If a region has exactly one open cell left,
@@ -585,8 +599,9 @@ function generateHintText() {
       };
     }
   }
+  noteChecked(T_LASTSPOT);
 
-  // ── Line Lock — row ──────────────────────────────────────────────────────
+  // ── Line Lock — color confined to a line ─────────────────────────────────
   // If all of a color's open cells sit in one row, that color owns the row —
   // no other color can use it, and the region can't use any other row either.
   for (const ci of unplacedColors) {
@@ -615,6 +630,7 @@ function generateHintText() {
         ...toMark.map(c => ({ ...c, role: c.row !== lr ? 'region' : 'locked' })),
       ],
       action: { type: 'xmarks', cells: toMark },
+      checked: [...checked],
     };
   }
 
@@ -646,8 +662,62 @@ function generateHintText() {
         ...toMark.map(c => ({ ...c, role: c.col !== lc ? 'region' : 'locked' })),
       ],
       action: { type: 'xmarks', cells: toMark },
+      checked: [...checked],
     };
   }
+
+  // ── Line Lock — line confined to a color (reverse) ───────────────────────
+  // If all of a ROW's open cells happen to be the same color, that row can
+  // only be filled by that color — even if the color also has candidates
+  // elsewhere. Cross that color out everywhere outside this row.
+  for (let r = 0; r < n; r++) {
+    if (placedRowSet.has(r)) continue;
+    const validCells = [];
+    for (let c = 0; c < n; c++) if (isValid(r, c)) validCells.push({ row: r, col: c });
+    if (validCells.length < 1) continue;
+    const colorsHere = new Set(validCells.map(({ col }) => grid[r][col]));
+    if (colorsHere.size !== 1) continue;
+    const ci = [...colorsHere][0];
+    const toMark = allRegionCells(ci).filter(({ row, col }) => row !== r && isValid(row, col) && !xMarks?.[row]?.[col]);
+    if (toMark.length === 0) continue;
+    return {
+      name: T_LINELOCK,
+      rule: "If all of a row's open cells are the same color, that row can only be filled by that color — cross that color out everywhere else, even if it still has other candidates.",
+      here: `Row ${r + 1} only has open ${cName(ci)} cells left — ${cName(ci)}'s cat is in row ${r + 1}, so cross out its cells everywhere else.`,
+      cells: [
+        ...validCells.map(c => ({ ...c, role: 'cat' })),
+        ...toMark.map(c => ({ ...c, role: 'locked' })),
+      ],
+      action: { type: 'xmarks', cells: toMark },
+      checked: [...checked],
+    };
+  }
+
+  // ── Line Lock — line confined to a color (reverse, column) ───────────────
+  // Mirror of the row case.
+  for (let c = 0; c < n; c++) {
+    if (usedCols.has(c)) continue;
+    const validCells = [];
+    for (let r = 0; r < n; r++) if (isValid(r, c)) validCells.push({ row: r, col: c });
+    if (validCells.length < 1) continue;
+    const colorsHere = new Set(validCells.map(({ row }) => grid[row][c]));
+    if (colorsHere.size !== 1) continue;
+    const ci = [...colorsHere][0];
+    const toMark = allRegionCells(ci).filter(({ row, col }) => col !== c && isValid(row, col) && !xMarks?.[row]?.[col]);
+    if (toMark.length === 0) continue;
+    return {
+      name: T_LINELOCK,
+      rule: "If all of a column's open cells are the same color, that column can only be filled by that color — cross that color out everywhere else, even if it still has other candidates.",
+      here: `Column ${c + 1} only has open ${cName(ci)} cells left — ${cName(ci)}'s cat is in column ${c + 1}, so cross out its cells everywhere else.`,
+      cells: [
+        ...validCells.map(cc => ({ ...cc, role: 'cat' })),
+        ...toMark.map(cc => ({ ...cc, role: 'locked' })),
+      ],
+      action: { type: 'xmarks', cells: toMark },
+      checked: [...checked],
+    };
+  }
+  noteChecked(T_LINELOCK);
 
   // ── Crowding — rows (K = 2..4) ───────────────────────────────────────────
   // If K colors are collectively confined to the same K rows, those rows are
@@ -680,6 +750,7 @@ function generateHintText() {
           ...toMark.map(c => ({ ...c, role: 'locked' })),
         ],
         action: { type: 'xmarks', cells: toMark },
+        checked: [...checked],
       };
     }
   }
@@ -713,181 +784,140 @@ function generateHintText() {
           ...toMark.map(c => ({ ...c, role: 'locked' })),
         ],
         action: { type: 'xmarks', cells: toMark },
+        checked: [...checked],
       };
     }
   }
 
-  // ── Squeeze — line segment (2–3 cells) ───────────────────────────────────
-  // When a color's open cells form a short contiguous run in one row or
-  // column, every cell in that run casts the same king-move shadow onto
-  // nearby cells. Whichever cell gets the cat, the shadow lands the same way,
-  // so anything touched by the whole run is doomed.
-  for (const ci of unplacedColors) {
-    const validCells = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
-    if (validCells.length < 2 || validCells.length > 3) continue;
-    const segRows = new Set(validCells.map(({ row }) => row));
-    const segCols = new Set(validCells.map(({ col }) => col));
-    let segment = null;
-    if (segRows.size === 1) {
-      const r = [...segRows][0];
-      const sortedCols = validCells.map(({ col }) => col).sort((a, b) => a - b);
-      if (sortedCols[sortedCols.length - 1] - sortedCols[0] === sortedCols.length - 1)
-        segment = { dir: 'row', fixed: r, span: sortedCols };
-    } else if (segCols.size === 1) {
-      const c = [...segCols][0];
-      const sortedRows = validCells.map(({ row }) => row).sort((a, b) => a - b);
-      if (sortedRows[sortedRows.length - 1] - sortedRows[0] === sortedRows.length - 1)
-        segment = { dir: 'col', fixed: c, span: sortedRows };
-    }
-    if (!segment) continue;
-    const haloMap = new Map();
-    if (segment.dir === 'row') {
-      const r = segment.fixed;
-      for (let dr = -1; dr <= 1; dr += 2) {
-        const nr = r + dr;
-        if (nr < 0 || nr >= n) continue;
-        for (let c = 0; c < n; c++) {
-          if (segment.span.every(sc => Math.abs(c - sc) <= 1) && isValid(nr, c) && !xMarks?.[nr]?.[c])
-            haloMap.set(`${nr},${c}`, { row: nr, col: c });
-        }
-      }
-    } else {
-      const c = segment.fixed;
-      for (let dc = -1; dc <= 1; dc += 2) {
-        const nc = c + dc;
-        if (nc < 0 || nc >= n) continue;
-        for (let r = 0; r < n; r++) {
-          if (segment.span.every(sr => Math.abs(r - sr) <= 1) && isValid(r, nc) && !xMarks?.[r]?.[nc])
-            haloMap.set(`${r},${nc}`, { row: r, col: nc });
-        }
-      }
-    }
-    if (haloMap.size === 0) continue;
-    const toMark = [...haloMap.values()];
-    return {
-      name: T_SQUEEZE,
-      rule: "When a color's open cells form a tight run of 2–3 in a line, every cell in the run casts the same shadow onto nearby cells — whichever one wins, cells boxed in by the whole run are doomed.",
-      here: `${cName(ci)} is squeezed into a short run — cross out the cells boxed in by all of it.`,
-      cells: [
-        ...validCells.map(c => ({ ...c, role: 'cat' })),
-        ...toMark.map(c => ({ ...c, role: 'locked' })),
-      ],
-      action: { type: 'xmarks', cells: toMark },
-    };
-  }
-
-  // ── Squeeze — diagonal pinch ─────────────────────────────────────────────
-  // A color reduced to exactly two diagonally-adjacent cells: any cell
-  // orthogonally next to BOTH is doomed, since either candidate would touch it.
-  for (const ci of unplacedColors) {
-    const validCells = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
-    if (validCells.length !== 2) continue;
-    const [a, b] = validCells;
-    if (Math.abs(a.row - b.row) !== 1 || Math.abs(a.col - b.col) !== 1) continue;
-    const toMark = [];
+  // ── Hidden Crowding — rows (K = 2..4) ────────────────────────────────────
+  // Dual of Crowding: if K rows can only be reached by K colors combined (no
+  // other color has any open cell in any of those rows), those K colors MUST
+  // place their cats inside those K rows — each row needs one, and only these
+  // colors can supply it. Cross those colors' cells outside the K rows.
+  for (let k = 2; k <= Math.min(4, n); k++) {
+    const rowSets = [];
     for (let r = 0; r < n; r++) {
-      for (let c = 0; c < n; c++) {
-        if (!isValid(r, c) || xMarks?.[r]?.[c]) continue;
-        const orthA = Math.abs(r - a.row) + Math.abs(c - a.col) === 1;
-        const orthB = Math.abs(r - b.row) + Math.abs(c - b.col) === 1;
-        if (orthA && orthB) toMark.push({ row: r, col: c });
-      }
+      if (placedRowSet.has(r)) continue;
+      const colorsHere = new Set();
+      for (let c = 0; c < n; c++) if (isValid(r, c)) colorsHere.add(grid[r][c]);
+      rowSets.push({ r, colors: colorsHere });
     }
-    if (toMark.length === 0) continue;
-    return {
-      name: T_SQUEEZE,
-      rule: 'When a color is down to two diagonally-touching cells, any cell orthogonally next to both is doomed — one of the two will always be its neighbor.',
-      here: `${cName(ci)} is down to two diagonal cells — cross out what's wedged between them.`,
-      cells: [
-        { ...a, role: 'cat' }, { ...b, role: 'cat' },
-        ...toMark.map(c => ({ ...c, role: 'locked' })),
-      ],
-      action: { type: 'xmarks', cells: toMark },
-    };
+    for (const combo of combinations(rowSets, k)) {
+      const union = new Set(combo.flatMap(({ colors }) => [...colors]));
+      if (union.size !== k) continue;
+      const rowSet = new Set(combo.map(({ r }) => r));
+      const toMark = [];
+      for (const ci of union)
+        for (const { row, col } of allRegionCells(ci))
+          if (!rowSet.has(row) && isValid(row, col) && !xMarks?.[row]?.[col]) toMark.push({ row, col });
+      if (toMark.length === 0) continue;
+      const names = [...union].map(ci => cName(ci)).join(', ');
+      const rowStr = [...rowSet].sort((a, b) => a - b).map(r => r + 1).join(', ');
+      return {
+        name: T_CROWDING,
+        rule: `If K rows can only be reached by K colors combined (no other color has an open cell in any of them), those colors must place inside those rows — cross their other cells out everywhere else.`,
+        here: `Only ${names} can reach rows ${rowStr} — their cats must go there, so cross their other cells out everywhere else.`,
+        cells: [
+          ...combo.flatMap(({ r }) => { const row = []; for (let c = 0; c < n; c++) if (isValid(r, c)) row.push({ row: r, col: c, role: 'cat' }); return row; }),
+          ...toMark.map(c => ({ ...c, role: 'locked' })),
+        ],
+        action: { type: 'xmarks', cells: toMark },
+        checked: [...checked],
+      };
+    }
   }
 
-  // ── Squeeze — conjugate pair (row / column / region) ────────────────────
-  // When a row, column, or color is down to exactly two candidates, any cell
-  // touching BOTH is doomed — whichever one wins, it lands next door.
+  // ── Hidden Crowding — columns (K = 2..4) ─────────────────────────────────
+  // Mirror of the row case.
+  for (let k = 2; k <= Math.min(4, n); k++) {
+    const colSets = [];
+    for (let c = 0; c < n; c++) {
+      if (usedCols.has(c)) continue;
+      const colorsHere = new Set();
+      for (let r = 0; r < n; r++) if (isValid(r, c)) colorsHere.add(grid[r][c]);
+      colSets.push({ c, colors: colorsHere });
+    }
+    for (const combo of combinations(colSets, k)) {
+      const union = new Set(combo.flatMap(({ colors }) => [...colors]));
+      if (union.size !== k) continue;
+      const colSet = new Set(combo.map(({ c }) => c));
+      const toMark = [];
+      for (const ci of union)
+        for (const { row, col } of allRegionCells(ci))
+          if (!colSet.has(col) && isValid(row, col) && !xMarks?.[row]?.[col]) toMark.push({ row, col });
+      if (toMark.length === 0) continue;
+      const names = [...union].map(ci => cName(ci)).join(', ');
+      const colStr = [...colSet].sort((a, b) => a - b).map(c => c + 1).join(', ');
+      return {
+        name: T_CROWDING,
+        rule: `If K columns can only be reached by K colors combined (no other color has an open cell in any of them), those colors must place inside those columns — cross their other cells out everywhere else.`,
+        here: `Only ${names} can reach columns ${colStr} — their cats must go there, so cross their other cells out everywhere else.`,
+        cells: [
+          ...combo.flatMap(({ c }) => { const col = []; for (let r = 0; r < n; r++) if (isValid(r, c)) col.push({ row: r, col: c, role: 'cat' }); return col; }),
+          ...toMark.map(c => ({ ...c, role: 'locked' })),
+        ],
+        action: { type: 'xmarks', cells: toMark },
+        checked: [...checked],
+      };
+    }
+  }
+  noteChecked(T_CROWDING);
+
+  // ── Shared Shadow — generalized common elimination ──────────────────────
+  // Take any unit that still needs a cat — a color region, a row, or a
+  // column — and look at ALL of its remaining candidate cells (any count, not
+  // just 2–3). A cat placed at any candidate u eliminates: u's row, u's
+  // column, u's color, and its 8 king-move neighbours. If some other open
+  // cell is eliminated by EVERY candidate in the unit (whichever one wins),
+  // that cell is dead regardless of which candidate gets the cat — no
+  // hypothesis needed. This subsumes and generalizes the old fixed-shape
+  // "line segment / diagonal pinch / conjugate pair" special cases: it works
+  // for any number of candidates and catches everything they did (and more,
+  // since it also reasons about shared color/line, not just king-move touch).
+  const kills = (u, x) =>
+    u.row === x.row || u.col === x.col ||
+    grid[u.row][u.col] === grid[x.row][x.col] ||
+    (Math.abs(u.row - x.row) <= 1 && Math.abs(u.col - x.col) <= 1);
+
+  const sharedShadowUnits = [];
+  for (const ci of unplacedColors) {
+    const v = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
+    if (v.length >= 2) sharedShadowUnits.push({ v, label: cName(ci), kind: 'color' });
+  }
   for (let r = 0; r < n; r++) {
     if (placedRowSet.has(r)) continue;
-    const validCols = [];
-    for (let c = 0; c < n; c++) if (isValid(r, c)) validCols.push(c);
-    if (validCols.length !== 2) continue;
-    const [c1, c2] = validCols;
-    const toMark = [];
-    for (let rr = 0; rr < n; rr++) {
-      if (rr === r) continue;
-      for (let cc = 0; cc < n; cc++) {
-        if (!isValid(rr, cc) || xMarks?.[rr]?.[cc]) continue;
-        if (Math.abs(rr - r) <= 1 && Math.abs(cc - c1) <= 1 && Math.abs(cc - c2) <= 1)
-          toMark.push({ row: rr, col: cc });
-      }
-    }
-    if (toMark.length === 0) continue;
-    return {
-      name: T_SQUEEZE,
-      rule: 'When a row, column, or color is down to exactly two candidates, any cell touching BOTH is doomed — whichever one wins, it lands next door.',
-      here: `Row ${r + 1} is down to two cells (col ${c1 + 1} and col ${c2 + 1}) — cross out what touches both.`,
-      cells: [
-        { row: r, col: c1, role: 'cat' }, { row: r, col: c2, role: 'cat' },
-        ...toMark.map(c => ({ ...c, role: 'locked' })),
-      ],
-      action: { type: 'xmarks', cells: toMark },
-    };
+    const v = []; for (let c = 0; c < n; c++) if (isValid(r, c)) v.push({ row: r, col: c });
+    if (v.length >= 2) sharedShadowUnits.push({ v, label: `Row ${r + 1}`, kind: 'row' });
   }
   for (let c = 0; c < n; c++) {
     if (usedCols.has(c)) continue;
-    const validRows = [];
-    for (let r = 0; r < n; r++) if (isValid(r, c)) validRows.push(r);
-    if (validRows.length !== 2) continue;
-    const [r1, r2] = validRows;
-    const toMark = [];
-    for (let rr = 0; rr < n; rr++) {
-      for (let cc = 0; cc < n; cc++) {
-        if (cc === c || !isValid(rr, cc) || xMarks?.[rr]?.[cc]) continue;
-        if (Math.abs(cc - c) <= 1 && Math.abs(rr - r1) <= 1 && Math.abs(rr - r2) <= 1)
-          toMark.push({ row: rr, col: cc });
-      }
-    }
-    if (toMark.length === 0) continue;
-    return {
-      name: T_SQUEEZE,
-      rule: 'When a row, column, or color is down to exactly two candidates, any cell touching BOTH is doomed — whichever one wins, it lands next door.',
-      here: `Column ${c + 1} is down to two cells (row ${r1 + 1} and row ${r2 + 1}) — cross out what touches both.`,
-      cells: [
-        { row: r1, col: c, role: 'cat' }, { row: r2, col: c, role: 'cat' },
-        ...toMark.map(c => ({ ...c, role: 'locked' })),
-      ],
-      action: { type: 'xmarks', cells: toMark },
-    };
+    const v = []; for (let r = 0; r < n; r++) if (isValid(r, c)) v.push({ row: r, col: c });
+    if (v.length >= 2) sharedShadowUnits.push({ v, label: `Column ${c + 1}`, kind: 'col' });
   }
-  for (const ci of unplacedColors) {
-    const validCells = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
-    if (validCells.length !== 2) continue;
-    const [a, b] = validCells;
+  for (const { v, label, kind } of sharedShadowUnits) {
     const toMark = [];
     for (let r = 0; r < n; r++) {
       for (let c = 0; c < n; c++) {
-        if ((r === a.row && c === a.col) || (r === b.row && c === b.col)) continue;
         if (!isValid(r, c) || xMarks?.[r]?.[c]) continue;
-        if (Math.abs(r - a.row) <= 1 && Math.abs(c - a.col) <= 1 &&
-            Math.abs(r - b.row) <= 1 && Math.abs(c - b.col) <= 1)
-          toMark.push({ row: r, col: c });
+        if (v.some(u => u.row === r && u.col === c)) continue;
+        if (v.every(u => kills(u, { row: r, col: c }))) toMark.push({ row: r, col: c });
       }
     }
     if (toMark.length === 0) continue;
+    const subject = kind === 'color' ? label : `${label}'s cat`;
     return {
       name: T_SQUEEZE,
-      rule: 'When a row, column, or color is down to exactly two candidates, any cell touching BOTH is doomed — whichever one wins, it lands next door.',
-      here: `${cName(ci)} is down to two cells — cross out what touches both.`,
+      rule: "Look at ALL of a color's (or row's, or column's) remaining candidates. If every single one of them would eliminate a certain cell — through its row, column, color, or by touching it — that cell is dead no matter which candidate wins.",
+      here: `Wherever ${subject} ends up, it always eliminates these cells too — cross them out.`,
       cells: [
-        { ...a, role: 'cat' }, { ...b, role: 'cat' },
+        ...v.map(c => ({ ...c, role: 'cat' })),
         ...toMark.map(c => ({ ...c, role: 'locked' })),
       ],
       action: { type: 'xmarks', cells: toMark },
+      checked: [...checked],
     };
   }
+  noteChecked(T_SQUEEZE);
 
   // ── What-If — batched contradiction test ────────────────────────────────
   // Test every open cell: pretend a cat sits there, then keep placing any cat
@@ -970,8 +1000,10 @@ function generateHintText() {
       here,
       cells: deadEnds.map(d => ({ row: d.row, col: d.col, role: 'locked' })),
       action: { type: 'xmarks', cells: deadEnds.map(d => ({ row: d.row, col: d.col })) },
+      checked: [...checked],
     };
   }
+  noteChecked(T_WHATIF);
 
   // ── Beyond the Rules — fallback ──────────────────────────────────────────
   // No technique above resolved this step. This should be rare now that
@@ -993,6 +1025,7 @@ function generateHintText() {
     here: `The ${cName(fbCi)} cat belongs at row ${fbRow + 1}, col ${fbCol + 1}.`,
     cells: [{ row: fbRow, col: fbCol, role: 'cat' }],
     action: { type: 'cat', row: fbRow, col: fbCol },
+    checked: [...checked],
   };
 }
 
