@@ -421,21 +421,48 @@ function clearHint() {
   state.hintCells = [];
   state.pendingAction = null;
   const box = document.getElementById('hint-box');
-  box.textContent = '';
+  box.innerHTML = '';
   box.classList.remove('visible');
   document.getElementById('hint-actions').hidden = true;
   renderGrid();
 }
 
-function showHint(text, cells = [], action = null) {
+// Every lesson has three parts: Name (the technique), Rule (the general
+// principle — what you actually learn), Here (how it applies to this board).
+function showHint(hint, cells = [], action = null) {
+  const { name, rule, here } = hint;
   state.hintCells = cells;
   state.pendingAction = action;
   const box = document.getElementById('hint-box');
-  box.textContent = text;
+  box.innerHTML = '';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'hint-name';
+  nameEl.textContent = name;
+  box.appendChild(nameEl);
+  if (rule) {
+    const ruleEl = document.createElement('div');
+    ruleEl.className = 'hint-rule';
+    ruleEl.textContent = rule;
+    box.appendChild(ruleEl);
+  }
+  const hereEl = document.createElement('div');
+  hereEl.className = 'hint-here';
+  hereEl.textContent = here;
+  box.appendChild(hereEl);
   box.classList.add('visible');
   document.getElementById('hint-actions').hidden = (action === null);
   renderGrid();
 }
+
+// Technique names used by the tactic engine below. Every deduction is taught
+// as Name → Rule (the general principle) → Here (how it applies right now) —
+// see docs/features/coaching-system.md for the full catalogue.
+const T_LASTSPOT = '🎯 Last Spot';
+const T_LINELOCK = '📏 Line Lock';
+const T_CROWDING = '👥 Crowding';
+const T_SQUEEZE = '🤏 Squeeze';
+const T_WHATIF = '🤔 What-If';
+const T_BEYOND = '🧩 Beyond the Rules';
 
 function generateHintText() {
   const { solution, grid, customColors, size: n, importedCats, revealedRows, xMarks } = state;
@@ -494,15 +521,18 @@ function generateHintText() {
     ];
   }
 
-  // ── Tactic 1 — Forced region ────────────────────────────────────────────
-  // A color region has exactly one valid cell left → place the cat there.
+  // ── Last Spot — by color region ─────────────────────────────────────────
+  // Each color gets exactly one cat. If a region has exactly one open cell left,
+  // that's where the cat goes.
   for (const ci of unplacedColors) {
     const regionCells = allRegionCells(ci);
     const valid = regionCells.filter(({ row, col }) => isValid(row, col));
     if (valid.length === 1) {
       const { row, col } = valid[0];
       return {
-        text: `The ${cName(ci)} region has only one open cell — place the cat at row ${row + 1}, col ${col + 1}.`,
+        name: T_LASTSPOT,
+        rule: 'Each color gets exactly one cat — if only one of its cells is still open, that must be it.',
+        here: `${cName(ci)} has a single open cell left: row ${row + 1}, col ${col + 1}.`,
         cells: [
           { row, col, role: 'cat' },
           ...regionCells.filter(c => !(c.row === row && c.col === col)).map(c => ({ ...c, role: 'region' })),
@@ -512,8 +542,9 @@ function generateHintText() {
     }
   }
 
-  // ── Tactic 2 — Forced row ───────────────────────────────────────────────
-  // A row has exactly one valid column → place the cat there.
+  // ── Last Spot — by row ───────────────────────────────────────────────────
+  // Every row needs exactly one cat. If a row is down to one open cell, that's
+  // where its cat goes.
   for (let r = 0; r < n; r++) {
     if (placedRowSet.has(r)) continue;
     const valid = [];
@@ -524,15 +555,18 @@ function generateHintText() {
       const locked = [];
       for (let c = 0; c < n; c++) if (c !== col) locked.push({ row: r, col: c, role: 'locked' });
       return {
-        text: `Row ${r + 1} has only one valid column — place the ${cName(ci)} cat at col ${col + 1}.`,
+        name: T_LASTSPOT,
+        rule: 'Every row needs a cat — if a row is down to one open cell, the cat goes there.',
+        here: `Row ${r + 1} has only row ${r + 1}, col ${col + 1} open — place the ${cName(ci)} cat there.`,
         cells: [{ row: r, col, role: 'cat' }, ...locked],
         action: { type: 'cat', row: r, col },
       };
     }
   }
 
-  // ── Tactic 3 — Forced column ────────────────────────────────────────────
-  // A column has exactly one valid row → place the cat there.
+  // ── Last Spot — by column ────────────────────────────────────────────────
+  // Every column needs exactly one cat. If a column is down to one open cell,
+  // that's where its cat goes.
   for (let c = 0; c < n; c++) {
     if (usedCols.has(c)) continue;
     const valid = [];
@@ -543,18 +577,18 @@ function generateHintText() {
       const locked = [];
       for (let r = 0; r < n; r++) if (r !== row) locked.push({ row: r, col: c, role: 'locked' });
       return {
-        text: `Column ${c + 1} has only one valid row — place the ${cName(ci)} cat at row ${row + 1}.`,
+        name: T_LASTSPOT,
+        rule: 'Every column needs a cat — if a column is down to one open cell, the cat goes there.',
+        here: `Column ${c + 1} has only row ${row + 1}, col ${c + 1} open — place the ${cName(ci)} cat there.`,
         cells: [{ row, col: c, role: 'cat' }, ...locked],
         action: { type: 'cat', row, col: c },
       };
     }
   }
 
-  // ── Tactic 4 — Region confined to one row (+ Vector Isolation) ──────────
-  // All valid cells for a color fall in the same row.
-  // Action A: cross out the region's own cells outside that row.
-  // Action B (Vector Isolation): since that row is "owned" by this region,
-  //   cross out other colors' valid cells in that row too.
+  // ── Line Lock — row ──────────────────────────────────────────────────────
+  // If all of a color's open cells sit in one row, that color owns the row —
+  // no other color can use it, and the region can't use any other row either.
   for (const ci of unplacedColors) {
     const regionCells = allRegionCells(ci);
     const validCells = regionCells.filter(({ row, col }) => isValid(row, col));
@@ -569,11 +603,13 @@ function generateHintText() {
     if (toMark.length === 0) continue;
     const validInRow = validCells.filter(({ row }) => row === lr);
     const hasVectorElim = toMark.some(({ row }) => row === lr);
-    const text = hasVectorElim
-      ? `The ${cName(ci)} region can only go in row ${lr + 1} — it claims that row, so cross out other colors there and any region cells outside the row.`
-      : `The ${cName(ci)} region can only go in row ${lr + 1} — cross out the rest of the region.`;
+    const here = hasVectorElim
+      ? `${cName(ci)} only fits in row ${lr + 1} — cross the other colors out of row ${lr + 1} (and any of ${cName(ci)}'s own cells elsewhere).`
+      : `${cName(ci)} only fits in row ${lr + 1} — cross out the rest of its cells elsewhere.`;
     return {
-      text,
+      name: T_LINELOCK,
+      rule: "If all of a color's open cells sit in one row, that color owns the row — nobody else can use it.",
+      here,
       cells: [
         ...validInRow.map(c => ({ ...c, role: 'cat' })),
         ...toMark.map(c => ({ ...c, role: c.row !== lr ? 'region' : 'locked' })),
@@ -582,8 +618,8 @@ function generateHintText() {
     };
   }
 
-  // ── Tactic 5 — Region confined to one column (+ Vector Isolation) ───────
-  // Mirror of Tactic 4 for columns.
+  // ── Line Lock — column ───────────────────────────────────────────────────
+  // Mirror of the row case.
   for (const ci of unplacedColors) {
     const regionCells = allRegionCells(ci);
     const validCells = regionCells.filter(({ row, col }) => isValid(row, col));
@@ -598,11 +634,13 @@ function generateHintText() {
     if (toMark.length === 0) continue;
     const validInCol = validCells.filter(({ col }) => col === lc);
     const hasVectorElim = toMark.some(({ col }) => col === lc);
-    const text = hasVectorElim
-      ? `The ${cName(ci)} region can only go in column ${lc + 1} — it claims that column, so cross out other colors there and any region cells outside the column.`
-      : `The ${cName(ci)} region can only go in column ${lc + 1} — cross out the rest of the region.`;
+    const here = hasVectorElim
+      ? `${cName(ci)} only fits in column ${lc + 1} — cross the other colors out of column ${lc + 1} (and any of ${cName(ci)}'s own cells elsewhere).`
+      : `${cName(ci)} only fits in column ${lc + 1} — cross out the rest of its cells elsewhere.`;
     return {
-      text,
+      name: T_LINELOCK,
+      rule: "If all of a color's open cells sit in one column, that color owns the column — nobody else can use it.",
+      here,
       cells: [
         ...validInCol.map(c => ({ ...c, role: 'cat' })),
         ...toMark.map(c => ({ ...c, role: c.col !== lc ? 'region' : 'locked' })),
@@ -611,10 +649,10 @@ function generateHintText() {
     };
   }
 
-  // ── Tactic 6 — Set Saturation, rows (K = 2..4) ──────────────────────────
-  // If K regions are collectively confined to the same K rows, those rows are
-  // fully consumed by those regions. Cross out any other color's valid cells in
-  // those rows. K=2 is the classic "naked pair"; K=3,4 are the triple/quad.
+  // ── Crowding — rows (K = 2..4) ───────────────────────────────────────────
+  // If K colors are collectively confined to the same K rows, those rows are
+  // fully booked by those colors — every other color is squeezed out of them.
+  // K=2 is the classic "naked pair"; K=3,4 are the triple/quad.
   for (let k = 2; k <= Math.min(4, unplacedColors.length); k++) {
     const colorRowSets = unplacedColors.map(ci => ({
       ci,
@@ -634,7 +672,9 @@ function generateHintText() {
       const names = combo.map(({ ci }) => cName(ci)).join(', ');
       const rowStr = rowList.map(r => r + 1).join(', ');
       return {
-        text: `${names} are all confined to rows ${rowStr} — those ${k} regions fill all ${k} cat slots in those rows, so cross out other colors there.`,
+        name: T_CROWDING,
+        rule: `If ${k} colors can only fit in the same ${k} rows, those rows are fully booked — every other color is squeezed out of them.`,
+        here: `${names} all live in rows ${rowStr} — cross everyone else out of those rows.`,
         cells: [
           ...combo.flatMap(({ ci }) => allRegionCells(ci).filter(({ row, col }) => isValid(row, col)).map(c => ({ ...c, role: 'cat' }))),
           ...toMark.map(c => ({ ...c, role: 'locked' })),
@@ -644,8 +684,8 @@ function generateHintText() {
     }
   }
 
-  // ── Tactic 7 — Set Saturation, columns (K = 2..4) ───────────────────────
-  // Mirror of Tactic 6 for columns.
+  // ── Crowding — columns (K = 2..4) ────────────────────────────────────────
+  // Mirror of the row case.
   for (let k = 2; k <= Math.min(4, unplacedColors.length); k++) {
     const colorColSets = unplacedColors.map(ci => ({
       ci,
@@ -665,7 +705,9 @@ function generateHintText() {
       const names = combo.map(({ ci }) => cName(ci)).join(', ');
       const colStr = colList.map(c => c + 1).join(', ');
       return {
-        text: `${names} are all confined to columns ${colStr} — those ${k} regions fill all ${k} cat slots in those columns, so cross out other colors there.`,
+        name: T_CROWDING,
+        rule: `If ${k} colors can only fit in the same ${k} columns, those columns are fully booked — every other color is squeezed out of them.`,
+        here: `${names} all live in columns ${colStr} — cross everyone else out of those columns.`,
         cells: [
           ...combo.flatMap(({ ci }) => allRegionCells(ci).filter(({ row, col }) => isValid(row, col)).map(c => ({ ...c, role: 'cat' }))),
           ...toMark.map(c => ({ ...c, role: 'locked' })),
@@ -675,11 +717,11 @@ function generateHintText() {
     }
   }
 
-  // ── Tactic 8 — Line-Segment Halo ────────────────────────────────────────
-  // When a region's valid cells form a contiguous segment of 2–3 cells in one
-  // row or column, any external cell that is king-move adjacent to EVERY cell
-  // of that segment is blocked — whichever segment cell gets the cat, it will
-  // always touch that external cell.
+  // ── Squeeze — line segment (2–3 cells) ───────────────────────────────────
+  // When a color's open cells form a short contiguous run in one row or
+  // column, every cell in that run casts the same king-move shadow onto
+  // nearby cells. Whichever cell gets the cat, the shadow lands the same way,
+  // so anything touched by the whole run is doomed.
   for (const ci of unplacedColors) {
     const validCells = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
     if (validCells.length < 2 || validCells.length > 3) continue;
@@ -722,12 +764,10 @@ function generateHintText() {
     }
     if (haloMap.size === 0) continue;
     const toMark = [...haloMap.values()];
-    const segLen = segment.span.length;
-    const where = segment.dir === 'row'
-      ? `row ${segment.fixed + 1}, cols ${segment.span.map(c => c + 1).join('–')}`
-      : `column ${segment.fixed + 1}, rows ${segment.span.map(r => r + 1).join('–')}`;
     return {
-      text: `The ${cName(ci)} region is squeezed into a ${segLen}-cell segment at ${where} — cells touching the whole segment are blocked by the king-move rule regardless of which cell gets the cat.`,
+      name: T_SQUEEZE,
+      rule: "When a color's open cells form a tight run of 2–3 in a line, every cell in the run casts the same shadow onto nearby cells — whichever one wins, cells boxed in by the whole run are doomed.",
+      here: `${cName(ci)} is squeezed into a short run — cross out the cells boxed in by all of it.`,
       cells: [
         ...validCells.map(c => ({ ...c, role: 'cat' })),
         ...toMark.map(c => ({ ...c, role: 'locked' })),
@@ -736,10 +776,9 @@ function generateHintText() {
     };
   }
 
-  // ── Tactic 9 — Diagonal Pinch ───────────────────────────────────────────
-  // A region reduced to exactly two diagonally-adjacent cells forms a "pinch".
-  // Any cell orthogonally adjacent to BOTH candidates is always blocked —
-  // one of the two must get the cat, and either one would touch that cell.
+  // ── Squeeze — diagonal pinch ─────────────────────────────────────────────
+  // A color reduced to exactly two diagonally-adjacent cells: any cell
+  // orthogonally next to BOTH is doomed, since either candidate would touch it.
   for (const ci of unplacedColors) {
     const validCells = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
     if (validCells.length !== 2) continue;
@@ -756,7 +795,9 @@ function generateHintText() {
     }
     if (toMark.length === 0) continue;
     return {
-      text: `The ${cName(ci)} region is down to two diagonally-adjacent cells — any cell orthogonally touching both is blocked, since whichever one gets the cat will king-move into it.`,
+      name: T_SQUEEZE,
+      rule: 'When a color is down to two diagonally-touching cells, any cell orthogonally next to both is doomed — one of the two will always be its neighbor.',
+      here: `${cName(ci)} is down to two diagonal cells — cross out what's wedged between them.`,
       cells: [
         { ...a, role: 'cat' }, { ...b, role: 'cat' },
         ...toMark.map(c => ({ ...c, role: 'locked' })),
@@ -765,11 +806,9 @@ function generateHintText() {
     };
   }
 
-  // ── Tactic 10 — Conjugate Pair ──────────────────────────────────────────
-  // When a row, column, or region is down to exactly 2 candidate cells, any
-  // external cell that would be king-move blocked by BOTH candidates can be
-  // eliminated — one of the two must be chosen, so both king-move zones apply.
-  // Check rows:
+  // ── Squeeze — conjugate pair (row / column / region) ────────────────────
+  // When a row, column, or color is down to exactly two candidates, any cell
+  // touching BOTH is doomed — whichever one wins, it lands next door.
   for (let r = 0; r < n; r++) {
     if (placedRowSet.has(r)) continue;
     const validCols = [];
@@ -787,7 +826,9 @@ function generateHintText() {
     }
     if (toMark.length === 0) continue;
     return {
-      text: `Row ${r + 1} has only two possible cells (cols ${c1 + 1} and ${c2 + 1}) — cells adjacent to both are blocked whichever one gets the cat.`,
+      name: T_SQUEEZE,
+      rule: 'When a row, column, or color is down to exactly two candidates, any cell touching BOTH is doomed — whichever one wins, it lands next door.',
+      here: `Row ${r + 1} is down to two cells (col ${c1 + 1} and col ${c2 + 1}) — cross out what touches both.`,
       cells: [
         { row: r, col: c1, role: 'cat' }, { row: r, col: c2, role: 'cat' },
         ...toMark.map(c => ({ ...c, role: 'locked' })),
@@ -795,7 +836,6 @@ function generateHintText() {
       action: { type: 'xmarks', cells: toMark },
     };
   }
-  // Check columns:
   for (let c = 0; c < n; c++) {
     if (usedCols.has(c)) continue;
     const validRows = [];
@@ -812,7 +852,9 @@ function generateHintText() {
     }
     if (toMark.length === 0) continue;
     return {
-      text: `Column ${c + 1} has only two possible rows (rows ${r1 + 1} and ${r2 + 1}) — cells adjacent to both are blocked whichever one gets the cat.`,
+      name: T_SQUEEZE,
+      rule: 'When a row, column, or color is down to exactly two candidates, any cell touching BOTH is doomed — whichever one wins, it lands next door.',
+      here: `Column ${c + 1} is down to two cells (row ${r1 + 1} and row ${r2 + 1}) — cross out what touches both.`,
       cells: [
         { row: r1, col: c, role: 'cat' }, { row: r2, col: c, role: 'cat' },
         ...toMark.map(c => ({ ...c, role: 'locked' })),
@@ -820,7 +862,6 @@ function generateHintText() {
       action: { type: 'xmarks', cells: toMark },
     };
   }
-  // Check regions:
   for (const ci of unplacedColors) {
     const validCells = allRegionCells(ci).filter(({ row, col }) => isValid(row, col));
     if (validCells.length !== 2) continue;
@@ -837,7 +878,9 @@ function generateHintText() {
     }
     if (toMark.length === 0) continue;
     return {
-      text: `The ${cName(ci)} region is down to two cells — any cell adjacent to both is blocked regardless of which one gets the cat.`,
+      name: T_SQUEEZE,
+      rule: 'When a row, column, or color is down to exactly two candidates, any cell touching BOTH is doomed — whichever one wins, it lands next door.',
+      here: `${cName(ci)} is down to two cells — cross out what touches both.`,
       cells: [
         { ...a, role: 'cat' }, { ...b, role: 'cat' },
         ...toMark.map(c => ({ ...c, role: 'locked' })),
@@ -846,10 +889,15 @@ function generateHintText() {
     };
   }
 
-  // ── Tactic 11 — Forward-check contradiction ──────────────────────────────
-  // For each valid cell, simulate placing a cat there and check whether any row,
-  // column, or color region immediately drops to zero valid cells. If it does,
-  // placing there is a logical contradiction — cross it out.
+  // ── What-If — batched contradiction test ────────────────────────────────
+  // Test every open cell: pretend a cat sits there, then keep placing any cat
+  // that becomes forced (a row/column/color down to a single valid cell). If
+  // that chain ever empties some row, column, or color, the test cell was
+  // impossible. All tests below run against the SAME current board snapshot,
+  // so they're independent of each other and safe to batch into one step —
+  // this collapses what could be dozens of individual eliminations (one tested
+  // cell at a time) into a single Apply, which is what actually opens up the
+  // simpler Last Spot / Line Lock rules on the next press.
   const simIsValid = (r, c, sCols, sColors, sCats) => {
     if (sCats.some(p => p.row === r)) return false;
     const ci = grid[r][c];
@@ -858,61 +906,7 @@ function generateHintText() {
     return !sCats.some(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
   };
 
-  for (let r = 0; r < n; r++) {
-    if (placedRowSet.has(r)) continue;
-    for (let c = 0; c < n; c++) {
-      if (!isValid(r, c)) continue;
-      const ci = grid[r][c];
-      const sCols = new Set([...usedCols, c]);
-      const sColors = new Set([...usedColors, ci]);
-      const sCats = [...cats, { row: r, col: c }];
-      const sPlaced = new Set([...placedRowSet, r]);
-      let why = null;
-      // Check all unplaced rows still have at least one valid cell
-      for (let rr = 0; rr < n && !why; rr++) {
-        if (sPlaced.has(rr)) continue;
-        let ok = false;
-        for (let cc = 0; cc < n && !ok; cc++)
-          if (simIsValid(rr, cc, sCols, sColors, sCats)) ok = true;
-        if (!ok) why = `row ${rr + 1} would have no valid placement`;
-      }
-      // Check all unplaced colors still have at least one valid cell
-      for (const ci2 of unplacedColors) {
-        if (why || ci2 === ci) continue;
-        let ok = false;
-        outer: for (let rr = 0; rr < n; rr++) {
-          if (sPlaced.has(rr)) continue;
-          for (let cc = 0; cc < n; cc++)
-            if (grid[rr][cc] === ci2 && simIsValid(rr, cc, sCols, sColors, sCats)) { ok = true; break outer; }
-        }
-        if (!ok) why = `the ${cName(ci2)} region would have no valid cell`;
-      }
-      // Check all unplaced columns still have at least one valid cell
-      for (let cc = 0; cc < n && !why; cc++) {
-        if (sCols.has(cc)) continue;
-        let ok = false;
-        for (let rr = 0; rr < n && !ok; rr++)
-          if (simIsValid(rr, cc, sCols, sColors, sCats)) ok = true;
-        if (!ok) why = `column ${cc + 1} would have no valid placement`;
-      }
-      if (why) {
-        return {
-          text: `Placing a cat at row ${r + 1}, col ${c + 1} causes a contradiction — ${why}. Cross it out.`,
-          cells: [{ row: r, col: c, role: 'locked' }],
-          action: { type: 'xmarks', cells: [{ row: r, col: c }] },
-        };
-      }
-    }
-  }
-
-  // ── Tactic 12 — Propagation contradiction (depth-2+) ─────────────────────
-  // Tactic 11 only checks for an *immediate* empty region after one hypothetical
-  // cat. This goes deeper: hypothesise a cat, then keep placing any cat that
-  // becomes forced (a row/column/region down to a single valid cell). If that
-  // forced chain ever empties some row/column/region, the original hypothesis is
-  // impossible — cross it out. This is the "two-step" deduction the original app
-  // shows ("…forces a cat here, after which the Orange region has no valid cell").
-  const propagate = (r0, c0) => {
+  const testCell = (r0, c0) => {
     const ci0 = grid[r0][c0];
     const sCols = new Set([...usedCols, c0]);
     const sColors = new Set([...usedColors, ci0]);
@@ -921,34 +915,31 @@ function generateHintText() {
     const chain = [];
     for (let guard = 0; guard < n * n; guard++) {
       let forced = null, why = null;
-      // Rows
       for (let rr = 0; rr < n && !why; rr++) {
         if (sPlaced.has(rr)) continue;
         const valids = [];
         for (let cc = 0; cc < n; cc++) if (simIsValid(rr, cc, sCols, sColors, sCats)) valids.push(cc);
-        if (valids.length === 0) why = `row ${rr + 1} would have no valid cell`;
+        if (valids.length === 0) why = `row ${rr + 1}`;
         else if (valids.length === 1 && !forced) forced = { row: rr, col: valids[0] };
       }
-      // Columns
       for (let cc = 0; cc < n && !why; cc++) {
         if (sCols.has(cc)) continue;
         const valids = [];
         for (let rr = 0; rr < n; rr++) if (simIsValid(rr, cc, sCols, sColors, sCats)) valids.push(rr);
-        if (valids.length === 0) why = `column ${cc + 1} would have no valid cell`;
+        if (valids.length === 0) why = `column ${cc + 1}`;
         else if (valids.length === 1 && !forced) forced = { row: valids[0], col: cc };
       }
-      // Color regions
       for (const ci2 of unplacedColors) {
         if (why || sColors.has(ci2)) continue;
         const valids = [];
         for (let rr = 0; rr < n; rr++)
           for (let cc = 0; cc < n; cc++)
             if (grid[rr][cc] === ci2 && simIsValid(rr, cc, sCols, sColors, sCats)) valids.push({ row: rr, col: cc });
-        if (valids.length === 0) why = `the ${cName(ci2)} region would have no valid cell`;
+        if (valids.length === 0) why = `the ${cName(ci2)} region`;
         else if (valids.length === 1 && !forced) forced = valids[0];
       }
-      if (why) return { why, chain };
-      if (!forced) return null;          // stable, no contradiction reachable this way
+      if (why) return why;
+      if (!forced) return null;
       sCats.push(forced); sCols.add(forced.col);
       sColors.add(grid[forced.row][forced.col]); sPlaced.add(forced.row);
       chain.push(forced);
@@ -956,40 +947,50 @@ function generateHintText() {
     return null;
   };
 
+  const deadEnds = [];
   for (let r = 0; r < n; r++) {
     if (placedRowSet.has(r)) continue;
     for (let c = 0; c < n; c++) {
       if (!isValid(r, c)) continue;
-      const res = propagate(r, c);
-      if (!res || res.chain.length === 0) continue;  // depth-1 cases handled by Tactic 11
-      const first = res.chain[0];
-      const chainNote = res.chain.length === 1
-        ? `forces the cat at row ${first.row + 1}, col ${first.col + 1}`
-        : `forces a chain of ${res.chain.length} placements`;
-      return {
-        text: `Placing a cat at row ${r + 1}, col ${c + 1} ${chainNote} — after which ${res.why}. That's a contradiction, so cross out row ${r + 1}, col ${c + 1}.`,
-        cells: [
-          { row: r, col: c, role: 'locked' },
-          ...res.chain.map(p => ({ ...p, role: 'cat' })),
-        ],
-        action: { type: 'xmarks', cells: [{ row: r, col: c }] },
-      };
+      const why = testCell(r, c);
+      if (why) deadEnds.push({ row: r, col: c, why });
     }
   }
+  if (deadEnds.length > 0) {
+    const reasons = [...new Set(deadEnds.map(d => d.why))];
+    const reasonStr = reasons.length <= 4
+      ? reasons.join(', ')
+      : `${reasons.slice(0, 3).join(', ')}, and ${reasons.length - 3} more`;
+    const here = deadEnds.length === 1
+      ? `A cat at row ${deadEnds[0].row + 1}, col ${deadEnds[0].col + 1} eventually leaves ${deadEnds[0].why} with no valid cell — cross it out.`
+      : `Testing ${deadEnds.length} cells shows each one eventually leaves something with no valid cell — cross them all out. (Dead ends: ${reasonStr}.)`;
+    return {
+      name: T_WHATIF,
+      rule: 'Test a cell: pretend the cat sits there and follow every move that becomes forced. If some row, column, or color ends up with nowhere to go, the test cell was impossible.',
+      here,
+      cells: deadEnds.map(d => ({ row: d.row, col: d.col, role: 'locked' })),
+      action: { type: 'xmarks', cells: deadEnds.map(d => ({ row: d.row, col: d.col })) },
+    };
+  }
 
-  // ── Fallback ─────────────────────────────────────────────────────────────
-  // No single deductive rule resolved this step. The solver knows the answer
-  // but the reasoning spans multiple interacting constraints simultaneously.
+  // ── Beyond the Rules — fallback ──────────────────────────────────────────
+  // No technique above resolved this step. This should be rare now that
+  // What-If is exhaustive over every open cell; it's a safety net for
+  // positions that genuinely need full search.
   const importedRowSet = new Set((importedCats || []).map(ic => ic.row));
   let fbRow = -1;
   for (let r = 0; r < n; r++) {
     if (!placedRowSet.has(r) && !importedRowSet.has(r)) { fbRow = r; break; }
   }
-  if (fbRow === -1) return { text: 'All cats are placed.', cells: [], action: null };
+  if (fbRow === -1) {
+    return { name: '✅ Done', rule: '', here: 'All cats are placed!', cells: [], action: null };
+  }
   const fbCol = solution[fbRow];
   const fbCi = grid[fbRow][fbCol];
   return {
-    text: `No single rule resolves this step — the solver determined the ${cName(fbCi)} cat belongs at row ${fbRow + 1}, col ${fbCol + 1}, but the reasoning requires tracking multiple constraints at once.`,
+    name: T_BEYOND,
+    rule: "No single technique cracks this position — the solver used full search to be sure.",
+    here: `The ${cName(fbCi)} cat belongs at row ${fbRow + 1}, col ${fbCol + 1}.`,
     cells: [{ row: fbRow, col: fbCol, role: 'cat' }],
     action: { type: 'cat', row: fbRow, col: fbCol },
   };
@@ -1085,10 +1086,10 @@ function runExplain() {
     return;
   }
   try {
-    const { text, cells, action } = generateHintText();
-    showHint(text, cells, action);
+    const hint = generateHintText();
+    showHint(hint, hint.cells, hint.action);
   } catch (e) {
-    showHint('Could not generate explanation.', [], null);
+    showHint({ name: '⚠️ Error', rule: '', here: 'Could not generate an explanation for this position.' }, [], null);
     console.error('runExplain error:', e);
   }
 }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Meowdoku Solver</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
   <div class="app">
@@ -47,28 +47,28 @@
       <summary>Tactics guide</summary>
       <div class="tactics-body">
         <div class="tactic">
-          <span class="tactic-name">One per row / col / color</span>
-          <span class="tactic-desc">Each row, column, and color region gets exactly one cat. Placing a cat immediately blocks the rest of that row, column, and color.</span>
+          <span class="tactic-name">The ground rules</span>
+          <span class="tactic-desc">Each row, column, and color gets exactly one cat. Cats can't touch — not even diagonally, so all 8 cells around a cat are blocked too.</span>
         </div>
         <div class="tactic">
-          <span class="tactic-name">No touching</span>
-          <span class="tactic-desc">Cats can't be adjacent — not even diagonally. All 8 surrounding cells of a cat are blocked.</span>
+          <span class="tactic-name">🎯 Last Spot</span>
+          <span class="tactic-desc">If a row, column, or color is down to exactly one open cell, the cat must go there.</span>
         </div>
         <div class="tactic">
-          <span class="tactic-name">Last valid cell</span>
-          <span class="tactic-desc">If a row or color region has only one cell that isn't crossed out or otherwise blocked, the cat must go there.</span>
+          <span class="tactic-name">📏 Line Lock</span>
+          <span class="tactic-desc">If all of a color's open cells sit in one row (or column), that color owns the line — cross every other color out of it.</span>
         </div>
         <div class="tactic">
-          <span class="tactic-name">Region locked to one row</span>
-          <span class="tactic-desc">If all remaining cells of a color region fall in the same row, that row belongs to that color. Cross out other colors in that row.</span>
+          <span class="tactic-name">👥 Crowding</span>
+          <span class="tactic-desc">If K colors can only fit in the same K rows (or columns), those lines are fully booked — cross every other color out of them. (K=2 is the classic "naked pair".)</span>
         </div>
         <div class="tactic">
-          <span class="tactic-name">Region locked to one column</span>
-          <span class="tactic-desc">Same idea vertically. If a region only has cells in one column, cross out other colors in that column.</span>
+          <span class="tactic-name">🤏 Squeeze</span>
+          <span class="tactic-desc">When a row, column, or color is down to just two or three candidates, any cell touching all of them is doomed — whichever one wins, it lands next door.</span>
         </div>
         <div class="tactic">
-          <span class="tactic-name">Pairs rule</span>
-          <span class="tactic-desc">If two color regions together can only appear in the same two rows (or two columns), those rows are reserved for those two colors — eliminate other colors from them.</span>
+          <span class="tactic-name">🤔 What-If</span>
+          <span class="tactic-desc">Test a cell: pretend a cat sits there and follow every move that becomes forced. If some row, column, or color ends up with nowhere to go, that cell was impossible — cross it out.</span>
         </div>
       </div>
     </details>
@@ -95,6 +95,6 @@
 
   <script src="solver.js?v=12"></script>
   <script src="image.js?v=19"></script>
-  <script src="app.js?v=22"></script>
+  <script src="app.js?v=23"></script>
 </body>
 </html>

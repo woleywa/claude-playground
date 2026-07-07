@@ -1,6 +1,6 @@
 # Coaching System
 
-**Status:** Done (Session 4 — 2026-06-23), tactic engine expanded (Session 5 — 2026-06-23)
+**Status:** Done (Session 4 — 2026-06-23), tactic engine expanded (Session 5 — 2026-06-23), rewritten as named lessons + batched What-If (Session 6)
 
 See `docs/architecture.md` for full design rationale and lessons learned.
 
@@ -16,14 +16,16 @@ Silent step-through. Each press reveals the next unplaced cat on the grid in row
 
 ## Explain button
 
-Progressive coaching. Each press runs the tactic engine against the current board state and returns one logical deduction:
+Progressive coaching. Each press runs the tactic engine against the current board state and returns one lesson, taught the same way every time — **Name** (the technique) → **Rule** (the general principle) → **Here** (how it applies right now):
 
-- One-sentence explanation of the rule that applies
+- Bold technique name with emoji (🎯 Last Spot, 📏 Line Lock, 👥 Crowding, 🤏 Squeeze, 🤔 What-If)
+- The general rule, in plain language — this is the part meant to transfer to the next puzzle
+- The specific application to the current board, coordinates last
 - Visual cell highlights (gold pulse = target cat, amber glow = region candidates, red border = cells being crossed out)
 - **Apply** button — executes the deduction (places the cat or writes X marks)
 - **Cancel** button — dismisses without changing the board
 
-Pressing Explain again after Apply or Cancel gives the next deduction on the updated board. The chain continues until the puzzle is solved.
+Pressing Explain again after Apply or Cancel gives the next lesson on the updated board. The chain continues until the puzzle is solved.
 
 ### State used by Explain
 
@@ -37,24 +39,20 @@ Pressing Explain again after Apply or Cancel gives the next deduction on the upd
 
 ### Tactic engine (`generateHintText` in `app.js`)
 
-Scans board state and returns the simplest applicable deduction as `{text, cells, action}`. Tactics fire in priority order — simplest first, forward-checking last.
+Scans board state and returns the simplest applicable deduction as `{name, rule, here, cells, action}`. Tactics fire in priority order — simplest first, What-If last. Several of the original 12 numbered tactics share one name below because they're the same *technique* applied to different shapes (row/column/region) — that's deliberate: the player should recognize "this is a Squeeze" regardless of which axis it hit.
 
-| # | Tactic | What it detects | Action |
+| Technique | Covers | What it detects | Action |
 |---|---|---|---|
-| 1 | **Forced region** | Region has exactly 1 valid cell | Place cat |
-| 2 | **Forced row** | Row has exactly 1 valid column | Place cat |
-| 3 | **Forced column** | Column has exactly 1 valid row | Place cat |
-| 4 | **Region→row confinement + Vector Isolation** | All valid region cells in one row → cross out region cells outside that row AND other colors' cells in that row | X marks |
-| 5 | **Region→col confinement + Vector Isolation** | Same, for columns | X marks |
-| 6 | **Set Saturation, rows K=2..4** | K regions confined to same K rows → cross out other colors in those rows (generalizes naked pair) | X marks |
-| 7 | **Set Saturation, cols K=2..4** | Same, for columns | X marks |
-| 8 | **Line-Segment Halo** | Region valid cells form a contiguous 2–3 cell segment → cross out cells king-adjacent to the whole segment | X marks |
-| 9 | **Diagonal Pinch** | Region down to exactly 2 diagonally-adjacent cells → cross out cells orthogonally adjacent to both | X marks |
-| 10 | **Conjugate Pair** | Row, column, or region down to 2 candidates → cross out cells king-adjacent to both | X marks |
-| 11 | **Forward-check contradiction** | Simulates each valid cell; if placement leaves any row/col/region at 0 valid cells, it's a contradiction → cross it out | X marks |
-| — | **Fallback** | No rule found → solver answer with honest disclaimer | Place cat |
+| 🎯 **Last Spot** | region / row / column | Down to exactly 1 valid cell | Place cat |
+| 📏 **Line Lock** | row, column | All of a color's valid cells fall in one line → cross that color's other cells AND other colors' cells on that line | X marks |
+| 👥 **Crowding** | rows K=2..4, cols K=2..4 | K colors confined to the same K lines → cross other colors out of those lines (generalizes "naked pair") | X marks |
+| 🤏 **Squeeze** | line segment (2–3), diagonal pinch, conjugate pair (row/col/region) | Down to 2–3 candidates that share a king-move shadow → cross out what's caught in that shadow | X marks |
+| 🤔 **What-If** | any open cell, batched | Hypothesize a cat, propagate every forced follow-up; if the chain empties a row/column/region, that cell is impossible. **Every open cell on the board is tested in one pass** and every dead end found is crossed out together — not one Explain-press per cell | X marks |
+| 🧩 **Beyond the Rules** (fallback) | — | No technique resolved it → solver answer with honest disclaimer | Place cat |
 
 `isValid(r, c)` checks: row unplaced · cell colored · column unused · color unused · not X-marked · no king-move clash.
+
+**Why What-If is batched:** early-game positions can have dozens of individually-impossible cells (see `docs/sessions/` Session 6 — a Hard level 840 needed 42 separate contradiction eliminations under the old one-cell-per-press design). Testing every open cell against the *same* board snapshot in one pass is sound — the tests don't depend on each other — so they're combined into a single Apply. This cut that level from 58 Explain presses to 16, and usually surfaces the simpler Last Spot/Line Lock rules on the very next press once the dead wood is cleared.
 
 ### Reference: original Meowdoku app
 
@@ -70,7 +68,7 @@ These screenshots show the original app's Explain-equivalent — the design we'r
 
 Key principle from the original: text is always a **reason** (why), never just a destination (where).
 
-`docs/assets/our-explain-fallback-example.png` shows the old state before the tactic engine was built — "Place the Red 10 cat at row 1, col 7." with no reasoning. The 11-tactic engine now handles all the cases shown above; the fallback only fires when none of them apply.
+`docs/assets/our-explain-fallback-example.png` shows the old state before the tactic engine was built — "Place the Red 10 cat at row 1, col 7." with no reasoning. The tactic engine now handles all the cases shown above; the fallback only fires when none of them apply.
 
 ---
 
