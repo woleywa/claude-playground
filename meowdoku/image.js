@@ -44,7 +44,7 @@ function hasLastImage() {
 function _getGeminiKey() {
   let k = localStorage.getItem('gemini_api_key');
   if (!k) {
-    k = window.prompt('Gemini API-Key eingeben (wird nur in diesem Browser gespeichert):');
+    k = window.prompt('Enter your Gemini API key (stored only in this browser):');
     if (k) { k = k.trim(); localStorage.setItem('gemini_api_key', k); }
   }
   return (k && k.trim()) || null;
@@ -55,7 +55,7 @@ function _sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 async function detectWithGemini(size, onResult, onStatus) {
   if (!_img.img) { onStatus && onStatus('Erst ein Bild importieren (📷 / 📋)'); return; }
   const key = _getGeminiKey();
-  if (!key) { onStatus && onStatus('Kein API-Key eingegeben'); return; }
+  if (!key) { onStatus && onStatus('No API key entered'); return; }
 
   onStatus && onStatus('🤖 KI analysiert das Bild…');
 
@@ -120,7 +120,7 @@ async function detectWithGemini(size, onResult, onStatus) {
 
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   let parsed;
-  try { parsed = JSON.parse(text); } catch (e) { onStatus && onStatus('🤖 Antwort unlesbar'); return; }
+  try { parsed = JSON.parse(text); } catch (e) { onStatus && onStatus('🤖 Unreadable response'); return; }
   if (!Array.isArray(parsed.grid) || !Array.isArray(parsed.colors)) {
     onStatus && onStatus('🤖 Unerwartetes Format'); return;
   }

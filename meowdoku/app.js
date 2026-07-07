@@ -106,6 +106,12 @@ function renderPalette() {
   palette.appendChild(makeSwatch(X_MARK_MODE));
   palette.appendChild(makeSwatch(CAT_MODE));
   for (let i = 0; i < state.size; i++) palette.appendChild(makeSwatch(i));
+
+  // Fade the right edge only when there's actually more to scroll to.
+  const container = document.getElementById('palette-container');
+  requestAnimationFrame(() => {
+    container.classList.toggle('has-overflow', palette.scrollWidth > container.clientWidth + 1);
+  });
 }
 
 function makeSwatch(idx) {
@@ -276,6 +282,12 @@ function getCellFromPoint(x, y) {
 
 function bindEvents() {
   const gridEl = document.getElementById('grid');
+
+  window.addEventListener('resize', () => {
+    const palette = document.getElementById('palette');
+    const container = document.getElementById('palette-container');
+    container.classList.toggle('has-overflow', palette.scrollWidth > container.clientWidth + 1);
+  });
 
   document.getElementById('size-slider').addEventListener('input', (e) => {
     state.size = parseInt(e.target.value, 10);

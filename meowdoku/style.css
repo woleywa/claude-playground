@@ -155,10 +155,11 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .btn-ai {
-  background: linear-gradient(135deg, #6d5dd3, #9061d8);
-  color: #fff;
-  padding: 0.5rem 1rem;
-  box-shadow: 0 2px 10px rgba(109, 93, 211, 0.4);
+  background: transparent;
+  color: var(--text-dim, #888);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8rem;
 }
 
 .ai-row {
@@ -176,6 +177,11 @@ input[type="range"]::-moz-range-thumb {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+}
+
+.palette-container.has-overflow {
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, black calc(100% - 28px), transparent 100%);
 }
 
 .palette-container::-webkit-scrollbar {
@@ -242,6 +248,7 @@ input[type="range"]::-moz-range-thumb {
 
 .grid {
   display: grid;
+  grid-auto-rows: 1fr;
   gap: 2px;
   padding: 4px;
   background: #252525;
@@ -269,16 +276,7 @@ input[type="range"]::-moz-range-thumb {
   animation: catpop 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.cell.excluded span {
-  font-size: calc(0.55 * min(calc(100vw - 2rem), 480px) / var(--grid-size));
-  pointer-events: none;
-  display: block;
-  line-height: 1;
-  color: rgba(255, 255, 255, 0.80);
-  font-weight: 900;
-  animation: xpop 0.12s ease-out;
-}
-
+.cell.excluded span,
 .cell.imported-x span {
   font-size: calc(0.55 * min(calc(100vw - 2rem), 480px) / var(--grid-size));
   pointer-events: none;
@@ -286,6 +284,7 @@ input[type="range"]::-moz-range-thumb {
   line-height: 1;
   color: rgba(255, 255, 255, 0.82);
   font-weight: 900;
+  animation: xpop 0.12s ease-out;
 }
 
 @keyframes catpop {
@@ -394,7 +393,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .status.ready {
-  color: #5090d0;
+  color: #888;
 }
 
 /* ── Tactics guide ── */
