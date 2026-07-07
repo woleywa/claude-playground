@@ -4,6 +4,7 @@
 
 ## Open
 
+- [ ] **Validate imported cats** — `handleImageResult` trusts `result.cats` blindly, so a detection glitch can flood one color region with many touching cats. Add `sanitizeImportedCats(cats, grid, n)`: drop any cat that conflicts with another (same row / column / color region, or king-move touching); surface a status note when cats are dropped so the user can re-add real ones with the 🐱 tool.
 - [ ] **Rotate the Gemini API key** — key was pasted in plaintext during S3. It never entered the repo (localStorage only), but rotate it in Google Cloud Console to be safe.
 - [ ] **Preset puzzles** — 2–3 encoded example puzzles, "Load Example" button → `docs/features/preset-puzzles.md`
 - [ ] **Multiple-solution detection** — warn when puzzle is ambiguous (solver finds >1 solution)
