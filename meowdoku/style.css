@@ -302,6 +302,11 @@ input[type="range"]::-moz-range-thumb {
   50%       { box-shadow: 0 0 0 5px rgba(232, 216, 96, 0.3),  0 0 24px rgba(232, 216, 96, 0.15); }
 }
 
+@keyframes hintpulse-locked {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(235, 64, 52, 0.95), 0 0 14px rgba(235, 64, 52, 0.55); }
+  50%       { box-shadow: 0 0 0 5px rgba(235, 64, 52, 0.45), 0 0 26px rgba(235, 64, 52, 0.25); }
+}
+
 .cell.hint-cat {
   animation: hintpulse 1.1s ease-in-out infinite;
   z-index: 2;
@@ -312,7 +317,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .cell.hint-locked {
-  box-shadow: inset 0 0 0 2px rgba(224, 96, 80, 0.55);
+  animation: hintpulse-locked 1.1s ease-in-out infinite;
+  z-index: 1;
 }
 
 /* ── Hint box ── */
