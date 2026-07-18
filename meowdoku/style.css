@@ -321,6 +321,20 @@ input[type="range"]::-moz-range-thumb {
   z-index: 1;
 }
 
+@keyframes hintpulse-ghost {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1; }
+}
+
+/* A hypothetical cat in a What-If forced chain — dashed, not solid, so it
+   reads as "if" rather than "place this now" (that's hint-cat's job). */
+.cell.hint-ghost {
+  outline: 2px dashed rgba(140, 170, 230, 0.9);
+  outline-offset: -2px;
+  animation: hintpulse-ghost 1.1s ease-in-out infinite;
+  z-index: 1;
+}
+
 /* ── Hint box ── */
 
 .hint-box {
@@ -362,8 +376,24 @@ input[type="range"]::-moz-range-thumb {
   font-weight: 700;
 }
 
+.hint-chain-step {
+  font-size: 0.78rem;
+  font-weight: 500;
+  opacity: 0.85;
+  margin-top: 0.35rem;
+  padding-left: 0.4rem;
+}
+
+.hint-more {
+  font-size: 0.75rem;
+  font-style: italic;
+  opacity: 0.65;
+  margin-top: 0.5rem;
+}
+
 .hint-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
@@ -377,6 +407,20 @@ input[type="range"]::-moz-range-thumb {
   font-size: 0.85rem;
   padding: 0.55rem 1rem;
   flex: 1;
+  min-width: 100px;
+}
+
+.btn-apply-all {
+  background: #3a6a8f;
+  color: #fff;
+  font-size: 0.8rem;
+  padding: 0.55rem 0.8rem;
+  flex: 1;
+  min-width: 100px;
+}
+
+.btn-apply-all[hidden] {
+  display: none;
 }
 
 /* ── Status bar ── */

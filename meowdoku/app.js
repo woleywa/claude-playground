@@ -86,6 +86,7 @@ const state = {
   importedCats: [],    // [{row,col}] — cats already placed in the imported screenshot
   hintCells: [],       // [{row,col,role}] — cells highlighted by the active hint
   pendingAction: null, // {type:'cat',row,col} | {type:'xmarks',cells:[{row,col}]}
+  pendingAllAction: null, // What-If only: xmarks action covering every dead end found, for "Apply All"
 };
 
 function createGrid(size) {
@@ -321,6 +322,7 @@ function bindEvents() {
   document.getElementById('hint-btn').addEventListener('click', runHint);
   document.getElementById('explain-btn').addEventListener('click', runExplain);
   document.getElementById('apply-btn').addEventListener('click', runApply);
+  document.getElementById('apply-all-btn').addEventListener('click', runApplyAll);
   document.getElementById('cancel-btn').addEventListener('click', clearHint);
 
   document.getElementById('photo-btn').addEventListener('click', () => {
@@ -432,10 +434,12 @@ function updateStatus() {
 function clearHint() {
   state.hintCells = [];
   state.pendingAction = null;
+  state.pendingAllAction = null;
   const box = document.getElementById('hint-box');
   box.innerHTML = '';
   box.classList.remove('visible');
   document.getElementById('hint-actions').hidden = true;
+  document.getElementById('apply-all-btn').hidden = true;
   renderGrid();
 }
 
@@ -443,10 +447,14 @@ function clearHint() {
 // principle — what you actually learn), Here (how it applies to this board).
 // A dimmed "checked" trail above the name shows which simpler techniques were
 // tried first and found nothing — so the player learns the checking order too.
+// What-If lessons add two more parts: chainLines (the forced chain, one step
+// per line, shown as ghost cats on the grid) and an optional moreLine when
+// other dead ends were found but not shown — Apply All handles those.
 function showHint(hint, cells = [], action = null) {
-  const { name, rule, here, checked } = hint;
+  const { name, rule, here, checked, chainLines, moreLine, allAction } = hint;
   state.hintCells = cells;
   state.pendingAction = action;
+  state.pendingAllAction = allAction || null;
   const box = document.getElementById('hint-box');
   box.innerHTML = '';
   if (checked && checked.length > 0) {
@@ -469,8 +477,23 @@ function showHint(hint, cells = [], action = null) {
   hereEl.className = 'hint-here';
   hereEl.textContent = here;
   box.appendChild(hereEl);
+  if (chainLines && chainLines.length > 0) {
+    for (const line of chainLines) {
+      const stepEl = document.createElement('div');
+      stepEl.className = 'hint-chain-step';
+      stepEl.textContent = line;
+      box.appendChild(stepEl);
+    }
+  }
+  if (moreLine) {
+    const moreEl = document.createElement('div');
+    moreEl.className = 'hint-more';
+    moreEl.textContent = moreLine;
+    box.appendChild(moreEl);
+  }
   box.classList.add('visible');
   document.getElementById('hint-actions').hidden = (action === null);
+  document.getElementById('apply-all-btn').hidden = !allAction;
   renderGrid();
 }
 
@@ -481,6 +504,7 @@ const T_LASTSPOT = '🎯 Last Spot';
 const T_LINELOCK = '📏 Line Lock';
 const T_CROWDING = '👥 Crowding';
 const T_SQUEEZE = '🤏 Shared Shadow';
+const T_TEAMSHADOW = '🤝 Team Shadow';
 const T_WHATIF = '🤔 What-If';
 const T_BEYOND = '🧩 Beyond the Rules';
 
@@ -931,15 +955,75 @@ function generateHintText() {
   }
   noteChecked(T_SQUEEZE);
 
-  // ── What-If — batched contradiction test ────────────────────────────────
+  // ── Team Shadow — two-unit shared shadow ─────────────────────────────────
+  // Sometimes no single color, row, or column alone dooms a cell — but two of
+  // them together do. Take every consistent pairing of a candidate from unit
+  // A with a candidate from unit B (skipping pairs that would conflict with
+  // each other): if EVERY such pairing eliminates cell X, then X is doomed no
+  // matter how A and B eventually resolve. A cell that belongs to BOTH units'
+  // candidate lists is handled on its own — one cat there would satisfy both
+  // units at once, so it alone must also eliminate X for the deduction to hold.
+  // Limited to unit pairs of size <=6 each to stay fast on any grid size.
+  const conflictsWith = (u, v) =>
+    u.row === v.row || u.col === v.col ||
+    grid[u.row][u.col] === grid[v.row][v.col] ||
+    (Math.abs(u.row - v.row) <= 1 && Math.abs(u.col - v.col) <= 1);
+
+  const teamUnits = sharedShadowUnits.filter(({ v }) => v.length >= 2 && v.length <= 6);
+  const teamSubject = (u) => u.kind === 'color' ? u.label : `${u.label}'s cat`;
+  for (let i = 0; i < teamUnits.length; i++) {
+    for (let j = i + 1; j < teamUnits.length; j++) {
+      const A = teamUnits[i], B = teamUnits[j];
+      const shared = A.v.filter(u => B.v.some(w => w.row === u.row && w.col === u.col));
+      const toMark = [];
+      for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+          if (!isValid(r, c) || xMarks?.[r]?.[c]) continue;
+          const x = { row: r, col: c };
+          if (A.v.some(u => u.row === r && u.col === c) || B.v.some(u => u.row === r && u.col === c)) continue;
+          let allPairsKill = true, anyPair = false;
+          for (const u of A.v) {
+            if (!allPairsKill) break;
+            for (const w of B.v) {
+              if (u.row === w.row && u.col === w.col) continue; // same-cell case handled below
+              if (conflictsWith(u, w)) continue;
+              anyPair = true;
+              if (!kills(u, x) && !kills(w, x)) { allPairsKill = false; break; }
+            }
+          }
+          if (allPairsKill) {
+            for (const w of shared) { anyPair = true; if (!kills(w, x)) { allPairsKill = false; break; } }
+          }
+          if (anyPair && allPairsKill) toMark.push(x);
+        }
+      }
+      if (toMark.length === 0) continue;
+      return {
+        name: T_TEAMSHADOW,
+        rule: "Sometimes no single color or line dooms a cell alone, but two of them together do: every possible way their two cats could land still eliminates the same cell — so it's dead no matter how the two work out.",
+        here: `Together, ${teamSubject(A)} and ${teamSubject(B)} always land somewhere that eliminates these cells — cross them out.`,
+        cells: [
+          ...A.v.map(c => ({ ...c, role: 'cat' })),
+          ...B.v.map(c => ({ ...c, role: 'cat' })),
+          ...toMark.map(c => ({ ...c, role: 'locked' })),
+        ],
+        action: { type: 'xmarks', cells: toMark },
+        checked: [...checked],
+      };
+    }
+  }
+  noteChecked(T_TEAMSHADOW);
+
+  // ── What-If — one dead end at a time, shallowest chain first ────────────
   // Test every open cell: pretend a cat sits there, then keep placing any cat
   // that becomes forced (a row/column/color down to a single valid cell). If
   // that chain ever empties some row, column, or color, the test cell was
-  // impossible. All tests below run against the SAME current board snapshot,
-  // so they're independent of each other and safe to batch into one step —
-  // this collapses what could be dozens of individual eliminations (one tested
-  // cell at a time) into a single Apply, which is what actually opens up the
-  // simpler Last Spot / Line Lock rules on the next press.
+  // impossible. Every open cell is tested against the SAME current board
+  // snapshot, so the tests are independent of each other — but rather than
+  // batching every dead end into one incomprehensible step, show only the
+  // ONE with the shortest forced chain (the easiest to actually follow),
+  // with that chain drawn out as ghost cats. An "Apply All" button lets the
+  // player clear every dead end found at once, once they've got the idea.
   const simIsValid = (r, c, sCols, sColors, sCats) => {
     if (sCats.some(p => p.row === r)) return false;
     const ci = grid[r][c];
@@ -947,6 +1031,10 @@ function generateHintText() {
     if (xMarks?.[r]?.[c]) return false;
     return !sCats.some(p => Math.abs(p.row - r) === 1 && Math.abs(p.col - c) <= 1);
   };
+
+  // reason: {kind:'row'|'col'|'color', idx}
+  const unitPhrase = (w) =>
+    w.kind === 'row' ? `row ${w.idx + 1}` : w.kind === 'col' ? `column ${w.idx + 1}` : cName(w.idx);
 
   const testCell = (r0, c0) => {
     const ci0 = grid[r0][c0];
@@ -956,20 +1044,20 @@ function generateHintText() {
     const sPlaced = new Set([...placedRowSet, r0]);
     const chain = [];
     for (let guard = 0; guard < n * n; guard++) {
-      let forced = null, why = null;
+      let forced = null, forcedReason = null, why = null;
       for (let rr = 0; rr < n && !why; rr++) {
         if (sPlaced.has(rr)) continue;
         const valids = [];
         for (let cc = 0; cc < n; cc++) if (simIsValid(rr, cc, sCols, sColors, sCats)) valids.push(cc);
-        if (valids.length === 0) why = `row ${rr + 1}`;
-        else if (valids.length === 1 && !forced) forced = { row: rr, col: valids[0] };
+        if (valids.length === 0) why = { kind: 'row', idx: rr };
+        else if (valids.length === 1 && !forced) { forced = { row: rr, col: valids[0] }; forcedReason = { kind: 'row', idx: rr }; }
       }
       for (let cc = 0; cc < n && !why; cc++) {
         if (sCols.has(cc)) continue;
         const valids = [];
         for (let rr = 0; rr < n; rr++) if (simIsValid(rr, cc, sCols, sColors, sCats)) valids.push(rr);
-        if (valids.length === 0) why = `column ${cc + 1}`;
-        else if (valids.length === 1 && !forced) forced = { row: valids[0], col: cc };
+        if (valids.length === 0) why = { kind: 'col', idx: cc };
+        else if (valids.length === 1 && !forced) { forced = { row: valids[0], col: cc }; forcedReason = { kind: 'col', idx: cc }; }
       }
       for (const ci2 of unplacedColors) {
         if (why || sColors.has(ci2)) continue;
@@ -977,14 +1065,14 @@ function generateHintText() {
         for (let rr = 0; rr < n; rr++)
           for (let cc = 0; cc < n; cc++)
             if (grid[rr][cc] === ci2 && simIsValid(rr, cc, sCols, sColors, sCats)) valids.push({ row: rr, col: cc });
-        if (valids.length === 0) why = `the ${cName(ci2)} region`;
-        else if (valids.length === 1 && !forced) forced = valids[0];
+        if (valids.length === 0) why = { kind: 'color', idx: ci2 };
+        else if (valids.length === 1 && !forced) { forced = valids[0]; forcedReason = { kind: 'color', idx: ci2 }; }
       }
-      if (why) return why;
+      if (why) return { why, chain };
       if (!forced) return null;
+      chain.push({ row: forced.row, col: forced.col, reason: forcedReason });
       sCats.push(forced); sCols.add(forced.col);
       sColors.add(grid[forced.row][forced.col]); sPlaced.add(forced.row);
-      chain.push(forced);
     }
     return null;
   };
@@ -994,24 +1082,35 @@ function generateHintText() {
     if (placedRowSet.has(r)) continue;
     for (let c = 0; c < n; c++) {
       if (!isValid(r, c)) continue;
-      const why = testCell(r, c);
-      if (why) deadEnds.push({ row: r, col: c, why });
+      const res = testCell(r, c);
+      if (res) deadEnds.push({ row: r, col: c, why: res.why, chain: res.chain });
     }
   }
   if (deadEnds.length > 0) {
-    const reasons = [...new Set(deadEnds.map(d => d.why))];
-    const reasonStr = reasons.length <= 4
-      ? reasons.join(', ')
-      : `${reasons.slice(0, 3).join(', ')}, and ${reasons.length - 3} more`;
-    const here = deadEnds.length === 1
-      ? `A cat at row ${deadEnds[0].row + 1}, col ${deadEnds[0].col + 1} eventually leaves ${deadEnds[0].why} with no valid cell — cross it out.`
-      : `Testing ${deadEnds.length} cells shows each one eventually leaves something with no valid cell — cross them all out. (Dead ends: ${reasonStr}.)`;
+    deadEnds.sort((a, b) => a.chain.length - b.chain.length);
+    const chosen = deadEnds[0];
+    const moreCount = deadEnds.length - 1;
+
+    const chainLines = chosen.chain.map(step =>
+      `→ That leaves ${unitPhrase(step.reason)} down to one cell — the ${cName(grid[step.row][step.col])} cat goes to row ${step.row + 1}, col ${step.col + 1}.`
+    );
+    chainLines.push(`→ Now ${unitPhrase(chosen.why)} has no valid cell left. So cross out row ${chosen.row + 1}, col ${chosen.col + 1}.`);
+    const moreLine = moreCount > 0
+      ? `${moreCount} more dead end${moreCount > 1 ? 's' : ''} found this way — Apply All crosses out all ${deadEnds.length} at once.`
+      : null;
+
     return {
       name: T_WHATIF,
       rule: 'Test a cell: pretend the cat sits there and follow every move that becomes forced. If some row, column, or color ends up with nowhere to go, the test cell was impossible.',
-      here,
-      cells: deadEnds.map(d => ({ row: d.row, col: d.col, role: 'locked' })),
-      action: { type: 'xmarks', cells: deadEnds.map(d => ({ row: d.row, col: d.col })) },
+      here: `Try a cat at row ${chosen.row + 1}, col ${chosen.col + 1}.`,
+      chainLines,
+      moreLine,
+      cells: [
+        { row: chosen.row, col: chosen.col, role: 'locked' },
+        ...chosen.chain.map(s => ({ row: s.row, col: s.col, role: 'ghost' })),
+      ],
+      action: { type: 'xmarks', cells: [{ row: chosen.row, col: chosen.col }] },
+      allAction: moreCount > 0 ? { type: 'xmarks', cells: deadEnds.map(d => ({ row: d.row, col: d.col })) } : null,
       checked: [...checked],
     };
   }
@@ -1172,6 +1271,20 @@ function runApply() {
     for (const { row, col } of action.cells) {
       state.xMarks[row][col] = true;
     }
+  }
+  clearHint();
+}
+
+// What-If only: crosses out every dead end found this pass, not just the one
+// shown — for once the player has seen the pattern and just wants it cleared.
+function runApplyAll() {
+  const action = state.pendingAllAction;
+  if (!action) return;
+  if (!state.xMarks) {
+    state.xMarks = Array.from({ length: state.size }, () => new Array(state.size).fill(false));
+  }
+  for (const { row, col } of action.cells) {
+    state.xMarks[row][col] = true;
   }
   clearHint();
 }
