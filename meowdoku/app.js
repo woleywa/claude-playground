@@ -32,46 +32,69 @@ function parseColorRGB(str) {
   return null;
 }
 
+// Canonical game palette: descriptive names + representative hex, sampled from
+// real Meowdoku screenshots (see docs/decisions.md). Imported region colors are
+// named by nearest match here — so two greens read "Light Green" / "Dark Green"
+// instead of the old hue-bucketed "Green 1" / "Green 2", and blues split into
+// "Sky Blue" / "Teal". Add a row here when a level shows a colour not yet listed.
+const COLOR_DICT = [
+  { name: 'Light Green', hex: '#9cd186' },
+  { name: 'Dark Green',  hex: '#488a58' },
+  { name: 'Pink',        hex: '#ea9edf' },
+  { name: 'Rose',        hex: '#c6748f' },
+  { name: 'Sky Blue',    hex: '#abc4e3' },
+  { name: 'Teal',        hex: '#5aa7bd' },
+  { name: 'Brown',       hex: '#9e6f4f' },
+  { name: 'Gold',        hex: '#c7a536' },
+  { name: 'Cream',       hex: '#f5d98f' },
+  { name: 'Purple',      hex: '#8579ce' },
+  { name: 'Lavender',    hex: '#b890d0' },
+  { name: 'Coral',       hex: '#e07068' },
+  { name: 'Orange',      hex: '#e2924e' },
+  { name: 'Slate',       hex: '#8090a8' },
+];
+const COLOR_DICT_RGB = COLOR_DICT.map(c => ({ name: c.name, rgb: parseColorRGB(c.hex) }));
+
+// Name a colour by snapping to the nearest known game colour. Near-neutral
+// colours (not in the game palette) fall back to a plain grey/black/white name.
 function approxColorName(color) {
   const rgb = parseColorRGB(color);
   if (!rgb) return 'Color';
-  const r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  const s = max === min ? 0 : (max - min) / (1 - Math.abs(2 * l - 1));
-  if (s < 0.12) return l < 0.25 ? 'Black' : l > 0.75 ? 'White' : 'Grey';
-  const d = max - min;
-  let h = 0;
-  if (d > 0) {
-    if (max === r) h = ((g - b) / d + 6) % 6;
-    else if (max === g) h = (b - r) / d + 2;
-    else h = (r - g) / d + 4;
-    h = h / 6 * 360;
+  const max = Math.max(...rgb), min = Math.min(...rgb);
+  if (max - min < 18) return max < 70 ? 'Black' : max > 200 ? 'White' : 'Grey';
+  let best = 'Color', bestD = Infinity;
+  for (const c of COLOR_DICT_RGB) {
+    const d = (rgb[0] - c.rgb[0]) ** 2 + (rgb[1] - c.rgb[1]) ** 2 + (rgb[2] - c.rgb[2]) ** 2;
+    if (d < bestD) { bestD = d; best = c.name; }
   }
-  if (h >= 15 && h < 50 && l < 0.52) return 'Brown';
-  if (h < 15 || h >= 345) return 'Red';
-  if (h < 38) return 'Orange';
-  if (h < 65) return 'Yellow';
-  if (h < 80) return 'Lime';
-  if (h < 160) return 'Green';
-  if (h < 195) return 'Teal';
-  if (h < 255) return 'Blue';
-  if (h < 285) return 'Purple';
-  if (h < 325) return 'Pink';
-  if (h < 345) return 'Magenta';
-  return 'Red';
+  return best;
 }
 
 function namedCustomColors(colors) {
-  const base = colors.map(hex => hex ? approxColorName(hex) : 'Color');
-  const count = {};
-  for (const n of base) count[n] = (count[n] || 0) + 1;
-  const seen = {};
-  return base.map(n => {
-    if (count[n] === 1) return n;
-    seen[n] = (seen[n] || 0) + 1;
-    return `${n} ${seen[n]}`;
-  });
+  const base = colors.map(c => c ? approxColorName(c) : 'Color');
+  const lum = c => {
+    const p = parseColorRGB(c);
+    return p ? (0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2]) / 255 : 0.5;
+  };
+  // Regions that still share a name (rare, since the dictionary already splits
+  // shades) are disambiguated by lightness — "Dark Green" / "Light Green" —
+  // never bare numbers, unless four-plus collide.
+  const groups = {};
+  base.forEach((n, i) => { (groups[n] = groups[n] || []).push(i); });
+  const label = new Array(base.length);
+  for (const n in groups) {
+    const idxs = groups[n];
+    if (idxs.length === 1) { label[idxs[0]] = n; continue; }
+    idxs.sort((a, b) => lum(colors[a]) - lum(colors[b])); // darkest first
+    const core = n.replace(/^(Light|Dark|Medium|Pale|Bright)\s+/, ''); // avoid "Dark Light Green"
+    const words = idxs.length === 2 ? ['Dark', 'Light']
+                : idxs.length === 3 ? ['Dark', 'Medium', 'Light']
+                : null;
+    idxs.forEach((idx, k) => {
+      label[idx] = words ? `${words[k]} ${core}` : `${n} ${k + 1}`;
+    });
+  }
+  return label;
 }
 
 const state = {
