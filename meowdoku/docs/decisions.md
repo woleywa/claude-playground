@@ -59,3 +59,33 @@
 
 **Decision:** Commit and push straight to `main`; no feature branches/PRs for the Meowdoku project.
 **Why:** Solo toy project on static hosting — branch/PR overhead isn't worth it. (Overrides the global default of always using feature branches; recorded in `meowdoku/CLAUDE.md`.)
+
+## 2026-07-18 (S5) — GitHub Pages deploys the whole repo, not just `meowdoku/`
+
+**Decision:** `.github/workflows/deploy.yml`'s `upload-pages-artifact` path changed from `meowdoku/` to `./`.
+**Why:** The repo became multi-project (Meowdoku + Zlatan + a root landing page), but the deploy workflow was still publishing only the `meowdoku/` subfolder as the site root — so the landing page and Zlatan site were fully built and committed but literally unreachable at any URL. This isn't Meowdoku-specific, but it directly blocked verifying any Meowdoku-adjacent work in production.
+
+## 2026-07-18 (S5) — Cat detection: near-black threshold, not "darker than background"
+
+**Decision:** `_extractGrid` flags a cell as containing a cat when a dense 9×9 sample finds ≥6 pixels below an absolute brightness of 60, not a background-relative threshold.
+**Why:** An earlier version used <95 absolute brightness, which was loose enough that a dark forest-green tile (~97 bright) got misdetected as a cat, flooding one color region with ~10 phantom cats that then corrupted every downstream tactic deduction. True cat fur/eyes/outline are genuinely black (~10–40); no game tile color gets that dark, so 60 is a safe floor with real margin on both sides — verified against three real boards (2, 5, and 6 cats): all cats found, zero false positives.
+
+## 2026-07-18 (S5) — X-mark detection: desaturation, not brightness-relative-to-background
+
+**Decision:** `isWhiteX` tests `min(r,g,b) > 195 && max(r,g,b) − min(r,g,b) < 30` — i.e., "is this pixel near-white/gray" — instead of the original "brighter than this cell's own background by a fixed +35."
+**Why:** The relative-brightness margin shrinks as the background gets brighter, so it becomes unreliable specifically on light pastel colors. Measured on a real screenshot: pink backgrounds run ~175 bright against a ~210-bright glyph, leaving only ~35 of headroom (the exact threshold) before antialiasing noise causes a miss — versus 65+ of headroom on a dark color like brown. Desaturation is invariant to the background's own brightness, since it only asks whether the sampled pixel itself looks white/gray.
+
+## 2026-07-18 (S5) — Grid-size tile-band threshold lowered to 0.2
+
+**Decision:** `_detectGridSize`'s colorful-fraction band threshold changed from 0.4 to 0.2.
+**Why:** A heavily X-marked row's colorful fraction can dip to ~0.29 (white X strokes read as non-colorful), which 0.4 mistook for an inter-tile gap — fragmenting one row into several bands and misreading an 8×8 board as 10×10. Real gaps read ~0.0, so 0.2 sits with a wide margin on both sides. Verified against an 8×8 board and two 10×10 boards.
+
+## 2026-07-18 (S5) — A "No Room" tactic was tested and rejected, not built
+
+**Decision:** No dedicated tactic for "a cat here would immediately strand some row/column/color" was added to the Explain engine.
+**Why:** Verified empirically (not assumed) across ~47,000 simulated positions that this case is *always* already caught by tactics that run earlier: a 1-candidate stranded unit is caught by Last Spot, a 2+-candidate one by Shared Shadow (whose "blocks" test is symmetric — "X would empty unit G" and "every remaining cell of G blocks X" are the same statement). Building it would have added code that could never fire. The habit of checking "would this ever actually fire?" before implementing a plausible-sounding tactic is the reusable lesson.
+
+## 2026-07-18 (S5) — What-If shows one dead end at a time, not batched
+
+**Decision:** The contradiction-testing tactic (What-If) finds every dead end in a pass but shows only the one with the shortest forced chain; the rest are available via a separate "Apply All" action, not folded into the main Apply.
+**Why:** An earlier design batched every dead end found into a single Apply, on the reasoning that testing them all against one board snapshot is sound (they're independent) — true, but it produced single Explain-presses crossing out 14 or 32 cells at once with no way to see why any individual one died, which user testing on real Hard levels confirmed was unfollowable. Per-cell chain depth varies from 1 to 8+ forced placements, so showing the shallowest one with its reasoning spelled out keeps each press comprehensible, while Apply All preserves the option to move fast once the pattern is understood.

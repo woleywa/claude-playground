@@ -24,7 +24,8 @@ Then visit http://localhost:8080
 | `index.html` | App shell |
 | `style.css` | All styles (mobile-first) |
 | `solver.js` | Pure backtracking CSP solver — no DOM |
-| `app.js` | State management + DOM + event handling |
+| `app.js` | State management + DOM + event handling + Explain tactic engine |
+| `image.js` | Screenshot import: grid/color/cat/X-mark detection, clustering |
 
 ## Solver API
 

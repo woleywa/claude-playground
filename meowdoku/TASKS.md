@@ -14,6 +14,16 @@
 
 ## Recently done
 
+- [x] **Playground landing page** — root `index.html` links to Meowdoku and Zlatan (Session 5)
+- [x] **Zlatan site** — quotes + facts, black/gold theme, random featured quote/fact per visit, upvote/downvote (Session 5)
+- [x] **GitHub Pages deploy fixed** — was only publishing `meowdoku/`; now publishes the whole repo so the landing page and Zlatan site are reachable (Session 5)
+- [x] **Visual polish pass** — fixed row-height bug (`grid-auto-rows`), palette overflow fade, AI-button restyle, muted status line, unified X-mark styling, translated remaining German strings to English (Session 5)
+- [x] **What-If redesigned** — shows one dead end at a time (shallowest forced chain, spelled out line-by-line, dashed "ghost" cat highlight) instead of batching dozens at once; **Apply All** button clears every dead end found that pass (Session 5)
+- [x] **New tactics** — Line Lock (reverse), Crowding (hidden), Shared Shadow (generalizes the old line-segment/pinch/conjugate-pair Squeeze to any candidate count), Team Shadow (two-unit joint reasoning) (Session 5)
+- [x] **Tactic engine rewritten as named lessons** — every deduction now teaches Name → Rule → Here instead of one dense sentence; a dimmed "checked first" trail shows which simpler techniques were tried and failed (Session 5)
+- [x] **Screenshot import accuracy fixes** — color naming (`approxColorName` now parses `rgb()`, not just `#hex`), cat detection (dense near-black sampling, no more false positives on dark tiles), grid-size band threshold (0.4→0.2, fixes 8×8 misread as 10×10), X-mark detection (desaturation-based, fixes misses on light backgrounds like pink) (Session 5)
+- [x] **Manual correction tools** — 🐱 cat-mode and ✕ X-mark-mode palette swatches; eraser also clears cats/X marks (Session 5)
+- [x] **Auto-X on cat Apply** — placing a cat via Explain now crosses out everything it eliminates (row, column, color region, 8 touching cells) (Session 5)
 - [x] **Explain tactic engine expanded** — 11 tactics: forced region/row/col, region confinement + vector isolation, set saturation K=2..4 rows+cols, line-segment halo, diagonal pinch, conjugate pair, forward-check contradiction; fallback text improved (Session 5)
 - [x] **`docs/features/hint-system.md` → `coaching-system.md`** — renamed, separated Hint and Explain into distinct sections (Session 5)
 - [x] **Explain/Apply progressive coaching flow** — tactical hints + Apply/Cancel buttons; each press gives one deduction; applied X marks accumulate (Session 4)
