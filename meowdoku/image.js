@@ -433,25 +433,31 @@ function _extractGrid(img, bounds, size) {
           pts.push([data[i], data[i+1], data[i+2]]);
         }
       const bgRgb = _medRGB(pts);
-      // Inner 3×3 (fractions 0.25, 0.50, 0.75) — safely inside any tile border/gap.
-      // Count pixels that look like an X mark overlay.
-      // White X: near-white and brighter than background.
+      // Dense sampling for X-mark detection (mirrors the cat-detection density
+      // below). The old 3×3 sample (9 points, fractions .25/.5/.75) had zero
+      // margin for error: on a real screenshot, an X glyph's true corner-to-
+      // corner diagonals only pass through 2-3 of those 9 fixed points, so a
+      // few pixels of grid-alignment drift (auto-detected bounding box a
+      // couple pixels off from the true tile edges) was enough to slide every
+      // sample point off the glyph for an isolated cell or two, while
+      // neighboring cells with slightly better luck still worked. Measured on
+      // real screenshots: a dense 9×9 sample lands 21+ hits on a real X vs ~1
+      // on a plain cell — a wide margin that tolerates a lot more drift than
+      // 9 sparse points ever could.
+      // White X: near-white/gray (low spread between channels), regardless of
+      // the cell's own background brightness — see approxColorName-adjacent
+      // history: a fixed "+35 brighter than background" test collapsed on
+      // light backgrounds like pink. Desaturation is background-brightness-
+      // independent.
       // Red X: strongly red on a non-red background (incorrect-mark indicator in original app).
       const bgIsReddish = bgRgb[0] > bgRgb[1] + 50 && bgRgb[0] > bgRgb[2] + 50;
       let xHits = 0;
-      for (let fr = 0.25; fr < 0.8; fr += 0.25)
-        for (let fc = 0.25; fc < 0.8; fc += 0.25) {
+      for (let fr = 0.12; fr <= 0.88; fr += 0.095)
+        for (let fc = 0.12; fc <= 0.88; fc += 0.095) {
           const px = Math.min(canvas.width - 1, Math.floor(x + (col + fc) * cw));
           const py = Math.min(canvas.height - 1, Math.floor(y + (row + fr) * ch));
           const i = (py * iw + px) * 4;
           const r = data[i], g = data[i+1], b = data[i+2];
-          // White X: near-white/gray (low spread between channels), regardless of
-          // the cell's own background brightness. The old test required the glyph
-          // to be brighter than the background by a fixed +35 — that margin
-          // collapses on light backgrounds (e.g. pink, ~175 bright already, vs a
-          // ~210-bright glyph leaves almost no headroom), causing missed X marks
-          // specifically on pale colors. Checking desaturation directly is
-          // background-brightness-independent.
           const isWhiteX = Math.min(r, g, b) > 195 && (Math.max(r, g, b) - Math.min(r, g, b)) < 30;
           const isRedX = !bgIsReddish && r > 160 && r > g * 1.6 && r > b * 1.6 && r > bgRgb[0] + 20;
           if (isWhiteX || isRedX) xHits++;
@@ -473,7 +479,7 @@ function _extractGrid(img, bounds, size) {
         }
       const hasCat = catHits >= 6;
       // A cat's white face patch can read like a white X — never both.
-      return { rgb: bgRgb, hasX: !hasCat && xHits >= 2, hasCat };
+      return { rgb: bgRgb, hasX: !hasCat && xHits >= 8, hasCat };
     })
   );
 
