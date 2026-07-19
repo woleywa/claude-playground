@@ -433,27 +433,24 @@ function _extractGrid(img, bounds, size) {
           pts.push([data[i], data[i+1], data[i+2]]);
         }
       const bgRgb = _medRGB(pts);
-      // Dense sampling for X-mark detection (mirrors the cat-detection density
-      // below). The old 3×3 sample (9 points, fractions .25/.5/.75) had zero
-      // margin for error: on a real screenshot, an X glyph's true corner-to-
-      // corner diagonals only pass through 2-3 of those 9 fixed points, so a
-      // few pixels of grid-alignment drift (auto-detected bounding box a
-      // couple pixels off from the true tile edges) was enough to slide every
-      // sample point off the glyph for an isolated cell or two, while
-      // neighboring cells with slightly better luck still worked. Measured on
-      // real screenshots: a dense 9×9 sample lands 21+ hits on a real X vs ~1
-      // on a plain cell — a wide margin that tolerates a lot more drift than
-      // 9 sparse points ever could.
-      // White X: near-white/gray (low spread between channels), regardless of
-      // the cell's own background brightness — see approxColorName-adjacent
-      // history: a fixed "+35 brighter than background" test collapsed on
-      // light backgrounds like pink. Desaturation is background-brightness-
-      // independent.
-      // Red X: strongly red on a non-red background (incorrect-mark indicator in original app).
+      // X-mark detection, keyed on one fact: INSIDE a tile, the only white thing
+      // is the X. No game colour is white — the lightest (cream) has a min
+      // channel ~143. So "is there white here?" is a clean signal, *provided we
+      // never sample outside the tile*: the cream/white gaps between tiles read
+      // as white too, and a dense edge-to-edge sample (the previous approach)
+      // caught those gaps on every cell, stamping a false X board-wide.
+      //   Fix: sample the cell INTERIOR only (0.28–0.72). Measured on two real
+      // boards, this gives a perfectly clean split — no-X cells score exactly 0
+      // white hits, X cells score 21–33 (out of 49) — with nothing in between.
+      // A real X also leaves the base colour showing in the triangles between
+      // its strokes (~40–65% white, never ~100%), so a near-all-white sample is
+      // treated as a mis-alignment, not a mark.
+      // White X: near-white/gray (low channel spread), background-independent.
+      // Red X: strongly red on a non-red background (incorrect-mark indicator).
       const bgIsReddish = bgRgb[0] > bgRgb[1] + 50 && bgRgb[0] > bgRgb[2] + 50;
-      let xHits = 0;
-      for (let fr = 0.12; fr <= 0.88; fr += 0.095)
-        for (let fc = 0.12; fc <= 0.88; fc += 0.095) {
+      let xHits = 0, xSamples = 0;
+      for (let fr = 0.28; fr <= 0.72; fr += 0.073)
+        for (let fc = 0.28; fc <= 0.72; fc += 0.073) {
           const px = Math.min(canvas.width - 1, Math.floor(x + (col + fc) * cw));
           const py = Math.min(canvas.height - 1, Math.floor(y + (row + fr) * ch));
           const i = (py * iw + px) * 4;
@@ -461,6 +458,7 @@ function _extractGrid(img, bounds, size) {
           const isWhiteX = Math.min(r, g, b) > 195 && (Math.max(r, g, b) - Math.min(r, g, b)) < 30;
           const isRedX = !bgIsReddish && r > 160 && r > g * 1.6 && r > b * 1.6 && r > bgRgb[0] + 20;
           if (isWhiteX || isRedX) xHits++;
+          xSamples++;
         }
       // Cat detection: the cat emoji has genuinely BLACK pixels (fur outline,
       // eyes) — brightness ~10–40. Plain colored tiles, even dark ones, stay
@@ -479,7 +477,8 @@ function _extractGrid(img, bounds, size) {
         }
       const hasCat = catHits >= 6;
       // A cat's white face patch can read like a white X — never both.
-      return { rgb: bgRgb, hasX: !hasCat && xHits >= 8, hasCat };
+      const hasX = !hasCat && xHits >= 6 && xHits < xSamples * 0.9;
+      return { rgb: bgRgb, hasX, hasCat };
     })
   );
 
