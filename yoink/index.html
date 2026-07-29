@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Yoink</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <a class="back" href="../">← Playground</a>
+    <h1>YOINK</h1>
+    <p class="hero-sub">Social media downloader</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <form id="lookup-form" class="lookup-row">
+        <input
+          id="url-input"
+          type="url"
+          inputmode="url"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="Paste a YouTube, TikTok, Instagram or X/Twitter link…"
+          required
+        >
+        <button type="submit" id="fetch-btn">Fetch</button>
+      </form>
+      <p id="platform-hint" class="platform-hint"></p>
+    </section>
+
+    <section id="result" class="panel result hidden">
+      <div class="result-media">
+        <img id="result-thumb" alt="" />
+      </div>
+      <div class="result-body">
+        <span id="result-platform" class="badge"></span>
+        <h2 id="result-title"></h2>
+        <p id="result-author" class="dim"></p>
+
+        <div id="result-actions" class="result-actions"></div>
+
+        <div id="result-limitation" class="limitation hidden">
+          <p>
+            Yoink couldn't pull the actual media file for this link straight from your browser —
+            that's expected, not a bug. See why and how to unlock full downloads below.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="status" class="panel status hidden"></section>
+
+    <section class="panel history hidden" id="history-section">
+      <h3>Recent lookups</h3>
+      <ul id="history-list"></ul>
+    </section>
+
+    <section class="panel settings">
+      <details id="settings-details">
+        <summary>Backend resolver (optional)</summary>
+        <p class="dim small">
+          Yoink runs entirely in your browser by default, which means real video/audio downloads
+          are blocked by CORS for most platforms — only metadata and thumbnails work out of the box.
+          Point Yoink at a self-hosted resolver (see <code>docs/BACKEND.md</code>) to unlock real
+          downloads for every platform, including YouTube.
+        </p>
+        <div class="resolver-row">
+          <input id="resolver-url" type="url" placeholder="https://your-resolver.example.com" autocomplete="off">
+          <button id="resolver-save" type="button">Save</button>
+          <button id="resolver-clear" type="button" class="ghost">Clear</button>
+        </div>
+        <p id="resolver-status" class="dim small"></p>
+      </details>
+    </section>
+  </main>
+
+  <footer>
+    <p>Client-side by default. Full downloads need a backend — see <code>docs/BACKEND.md</code>.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

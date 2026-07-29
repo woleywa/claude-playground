@@ -8,6 +8,7 @@ Multi-project repository. Each project lives in its own subdirectory with its ow
 |---|---|---|
 | Meowdoku Solver | `meowdoku/` | Mobile web tool for solving Meowdoku / LinkedIn Queens-style puzzles |
 | Zlatan          | `zlatan/`   | Quotes and facts from Zlatan Ibrahimović |
+| Yoink           | `yoink/`    | Social media downloader (YouTube/TikTok/Instagram/X) — client-side app + optional backend + MCP server |
 
 ## Rules
 
