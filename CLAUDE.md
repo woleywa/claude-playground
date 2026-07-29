@@ -15,3 +15,8 @@ Multi-project repository. Each project lives in its own subdirectory with its ow
 See `~/.claude/CLAUDE.md` for global rules. Each project's `CLAUDE.md` takes precedence for project-specific decisions.
 
 No shared build system — each project is self-contained.
+
+## Cross-project infrastructure
+
+See `docs/infrastructure.md` for hosting/database decisions that apply across projects (where a
+backend + database would run for projects that outgrow static GitHub Pages, e.g. Yoink).
