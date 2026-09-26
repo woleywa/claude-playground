@@ -3,633 +3,79 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🟦 Block Out Solver</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: #0d0d0d; color: #e2e8f0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      min-height: 100vh; display: flex; flex-direction: column;
-      align-items: center; padding: 24px 16px 60px; gap: 12px;
-    }
-    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
-    .subtitle { color: #475569; font-size: 0.8rem; margin-top: 4px; text-align: center; }
-
-    /* Controls */
-    .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; align-items: center; }
-    select, .btn {
-      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 8px; color: #e2e8f0; padding: 6px 12px; font-size: 0.8rem;
-      cursor: pointer; outline: none;
-    }
-    .btn { font-weight: 600; transition: opacity 0.15s, transform 0.1s; }
-    .btn:hover { opacity: 0.85; } .btn:active { transform: scale(0.97); }
-    .btn-solve { background: #3b82f6; border-color: #3b82f6; color: white; }
-    .btn-clear { background: rgba(255,255,255,0.08); }
-
-    /* Palette */
-    .palette-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; }
-    .tool-chip {
-      width: 38px; height: 38px; border-radius: 7px; cursor: pointer;
-      border: 3px solid transparent; transition: transform 0.1s, border-color 0.12s;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 13px; font-weight: 700; user-select: none;
-    }
-    .tool-chip:hover { transform: scale(1.08); }
-    .tool-chip.active { border-color: white; transform: scale(1.12); }
-
-    /* Chain/key modifiers */
-    .modifiers { display: flex; gap: 6px; align-items: center; font-size: 0.8rem; color: #64748b; }
-    .mod-btn {
-      padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 600;
-      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
-      color: #94a3b8; cursor: pointer; transition: all 0.12s;
-    }
-    .mod-btn.active { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.3); color: #e2e8f0; }
-    input[type=number] {
-      width: 44px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 6px; color: #e2e8f0; padding: 4px 6px; font-size: 0.78rem; text-align: center;
-    }
-
-    /* Board container */
-    .board-wrap { position: relative; }
-    .board-grid {
-      display: inline-grid; gap: 2px;
-      padding: 6px; background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.07); border-radius: 10px;
-    }
-
-    /* Cells */
-    .cell {
-      width: 44px; height: 44px; border-radius: 6px; cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 700; transition: filter 0.08s;
-      position: relative; flex-direction: column; gap: 1px;
-      border: 2px solid transparent;
-    }
-    .cell:hover { filter: brightness(1.25); }
-    .cell.empty { background: rgba(255,255,255,0.05); border: 1px dashed rgba(255,255,255,0.1); }
-    .cell.wall { background: #374151; border-color: #4b5563; color: #6b7280; font-size: 16px; }
-    .cell.block { border-color: transparent; }
-    .cell.chain { border-style: solid; border-width: 3px; opacity: 0.85; }
-    .cell.key .key-icon { font-size: 14px; line-height: 1; }
-    .cell.key .key-label { font-size: 9px; opacity: 0.8; line-height: 1; }
-    .chain-count { font-size: 18px; font-weight: 900; }
-    .chain-icon { font-size: 11px; opacity: 0.7; }
-
-    /* Arrow buttons around the board */
-    .arrow-grid {
-      display: inline-grid; gap: 2px;
-    }
-    .arr-btn {
-      width: 44px; height: 28px; border-radius: 5px; cursor: pointer;
-      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
-      color: #475569; font-size: 14px; transition: all 0.12s; display: flex;
-      align-items: center; justify-content: center;
-    }
-    .arr-btn:hover { background: rgba(255,255,255,0.1); color: #94a3b8; }
-    .arr-btn.active { background: rgba(59,130,246,0.2); border-color: #3b82f6; color: #60a5fa; }
-    .arr-btn.side { width: 28px; height: 44px; }
-    .corner { width: 28px; height: 28px; }
-
-    /* Status */
-    #status { font-size: 0.85rem; text-align: center; min-height: 20px; }
-    .info { color: #475569; } .ok { color: #10b981; font-weight: 600; } .err { color: #ef4444; }
-
-    /* Solution panel */
-    #solution-panel {
-      max-width: 640px; width: 100%;
-      background: rgba(255,255,255,0.025); border: 1px solid rgba(255,255,255,0.07);
-      border-radius: 10px; padding: 14px 16px; display: none;
-    }
-    #solution-panel h2 { font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; }
-    .step-list { display: flex; flex-direction: column; gap: 6px; }
-    .step {
-      display: flex; align-items: center; gap: 10px; padding: 8px 12px;
-      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 8px; cursor: pointer; transition: background 0.1s;
-    }
-    .step:hover { background: rgba(255,255,255,0.06); }
-    .step.current { background: rgba(59,130,246,0.12); border-color: rgba(59,130,246,0.3); }
-    .step-num { width: 24px; height: 24px; border-radius: 50%; background: #1e293b;
-      display: flex; align-items: center; justify-content: center; font-size: 0.75rem;
-      font-weight: 700; color: #64748b; flex-shrink: 0; }
-    .step-arrow { font-size: 1.2rem; }
-    .step-desc { font-size: 0.82rem; color: #94a3b8; }
-    .step-nav { display: flex; gap: 6px; margin-top: 10px; justify-content: center; }
-
-    .hint { max-width: 520px; background: rgba(255,255,255,0.025);
-      border: 1px solid rgba(255,255,255,0.06); border-radius: 10px;
-      padding: 12px 14px; font-size: 0.78rem; color: #475569; line-height: 1.75; }
-    .hint strong { color: #64748b; }
-  </style>
+  <title>Block Out Solver</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <header>
+    <a class="back" href="../">← Playground</a>
+    <h1>🟦 Block Out Solver</h1>
+    <p class="sub">Import a screenshot or draw the board, then Solve.</p>
+  </header>
 
-<header>
-  <h1>🟦 Block Out Solver</h1>
-  <p class="subtitle">Paint the board, toggle edge arrows, hit Solve</p>
-</header>
-
-<div class="controls">
-  <select id="size-sel">
-    <option value="6">6×6</option>
-    <option value="7">7×7</option>
-    <option value="8" selected>8×8</option>
-    <option value="9">9×9</option>
-    <option value="10">10×10</option>
-  </select>
-  <select id="preset-sel">
-    <option value="">— Load preset —</option>
-    <option value="demo">Demo 6×6</option>
-  </select>
-  <button class="btn btn-clear" id="clear-btn">Clear</button>
-  <button class="btn btn-solve" id="solve-btn">Solve ▶</button>
-</div>
-
-<!-- Painting palette -->
-<div class="palette-row" id="palette"></div>
-<div class="palette-row modifiers">
-  <span>Mode:</span>
-  <button class="mod-btn active" id="mod-normal" data-mod="normal">Block</button>
-  <button class="mod-btn" id="mod-chain" data-mod="chain">Chain 🔗</button>
-  <input type="number" id="chain-count" min="1" max="9" value="1" title="Chain count">
-  <button class="mod-btn" id="mod-key" data-mod="key">Key 🗝️</button>
-  <button class="mod-btn" id="mod-wall" data-mod="wall">Wall</button>
-  <button class="mod-btn" id="mod-erase" data-mod="erase">✕ Erase</button>
-</div>
-
-<div id="board-outer"></div>
-<div id="status" class="info">Select a color, paint cells, toggle arrows, then Solve.</div>
-<div id="solution-panel">
-  <h2>Solution — <span id="step-count"></span> moves</h2>
-  <div class="step-list" id="step-list"></div>
-  <div class="step-nav">
-    <button class="btn" id="prev-step">← Prev</button>
-    <span id="step-label" style="color:#64748b;font-size:0.82rem;align-self:center;">Step 0</span>
-    <button class="btn" id="next-step">Next →</button>
+  <div class="bar">
+    <label class="btn primary" for="file">📷 Screenshot</label>
+    <input type="file" id="file" accept="image/*" hidden>
+    <select id="preset">
+      <option value="">Load…</option>
+      <option value="l198">Level 198</option>
+      <option value="demo">Small demo</option>
+      <option value="blank">Blank board</option>
+    </select>
+    <button class="btn" id="solve">Solve ▶</button>
   </div>
-</div>
 
-<div class="hint">
-  <strong>How to use:</strong>
-  Pick a color → paint cells → set arrows (click edges) → <strong>Solve</strong>.<br>
-  <strong>Block</strong>: regular sliding block. <strong>Chain 🔗</strong>: locked, won't move until a 🗝️ key block touches it (chain count times). <strong>Key 🗝️</strong>: slides normally but unlocks chains on contact.<br>
-  Arrows push all moveable blocks in that row/col. Blocks that exit the board are cleared. Win = all colored blocks gone.
-</div>
+  <section id="import" class="panel" hidden>
+    <p class="hint-line">Drag a box over the <b>grid of blocks</b>: inside the frame, not including it.</p>
+    <div class="size-row">
+      <label>Columns <input type="number" id="imp-w" min="3" max="12" value="7"></label>
+      <label>Rows <input type="number" id="imp-h" min="3" max="14" value="10"></label>
+    </div>
+    <div id="imp-stage"><img id="imp-img" alt="Screenshot"><div id="imp-box" hidden></div></div>
+    <div class="bar">
+      <button class="btn" id="imp-cancel">Cancel</button>
+      <button class="btn primary" id="imp-go" disabled>Detect board</button>
+    </div>
+  </section>
 
-<script>
-const BLOCK_COLORS = ['#EF4444','#10B981','#3B82F6','#EAB308','#8B5CF6','#F97316'];
-const COLOR_KEYS   = ['r','g','b','y','p','o'];
-const LABEL_MAP    = {'r':'R','g':'G','b':'B','y':'Y','p':'P','o':'O'};
-const ARROW_CHARS  = { L:'←', R:'→', U:'↑', D:'↓' };
+  <section id="editor">
+    <div class="tools" id="tools">
+      <button data-tool="select" class="on">Select</button>
+      <button data-tool="draw">Draw piece</button>
+      <button data-tool="gate">Draw exit</button>
+      <button data-tool="erase">Erase</button>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div id="board-wrap"><div id="board"></div></div>
+    <div id="inspector" class="panel" hidden></div>
+    <div class="size-row">
+      <label>Columns <input type="number" id="w" min="3" max="12"></label>
+      <label>Rows <input type="number" id="h" min="3" max="14"></label>
+      <label class="check"><input type="checkbox" id="per-cell"> Ice ticks per cell</label>
+    </div>
+  </section>
 
-// ─── Board State ───────────────────────────────────────────────
-// Each cell: { t: 'empty'|'wall'|'block'|'chain'|'key', c: colorKey|null, n: chainCount }
-// Serialized as 3-char strings: '   '=empty, '###'=wall, 'r  '=red block,
-//   'gK '=green key, 'b3 '=blue chain-3
+  <p id="status"></p>
 
-let N = 8;
-let cells = [];     // flat N×N array of cell objects
-let arrows = {};    // { 'L0':true, 'R0':false, 'U0':true, 'D0':false, ... }
-let selColor = 'r';
-let selMod = 'normal';
+  <section id="solution" class="panel" hidden>
+    <div class="sol-head">
+      <button class="btn" id="prev">←</button>
+      <div id="step-text"></div>
+      <button class="btn" id="next">→</button>
+    </div>
+    <ol id="steps"></ol>
+    <button class="btn" id="edit">✎ Back to editing</button>
+  </section>
 
-function emptyCell() { return { t: 'empty', c: null, n: 0 }; }
-function wallCell()  { return { t: 'wall',  c: null, n: 0 }; }
-function blockCell(c){ return { t: 'block', c, n: 0 }; }
-function chainCell(c,n){ return { t: 'chain', c, n }; }
-function keyCell(c)  { return { t: 'key',   c, n: 0 }; }
+  <details class="panel help">
+    <summary>How it works</summary>
+    <p><b>Screenshot:</b> pick the image, drag a box over the blocks, Detect. Colours, piece shapes, keys, locks, ice and exits are read automatically. <b>Numbers aren't</b>: tap each ice block, lock and frozen exit (Select tool) and type its number.</p>
+    <p><b>Rules:</b> drag a piece anywhere through empty space; it leaves through an exit of its own colour that is at least as wide as the piece. Each piece that leaves counts down every ice block by one; every move counts down the frozen exits. A piece with a key opens the lock of its own colour when it leaves.</p>
+    <p><b>Unknown colours (?)</b>: pieces still under ice and frozen exits. The solver plays as far as it can; do those moves, then import a new screenshot once the colours show.</p>
+  </details>
 
-function cloneCell(cell) { return { ...cell }; }
-function cloneBoard(b)   { return b.map(cloneCell); }
-
-function init(size, preset) {
-  N = size;
-  document.getElementById('size-sel').value = N;
-  cells = preset ? [...preset] : new Array(N * N).fill(null).map(emptyCell);
-  arrows = {};
-  document.getElementById('solution-panel').style.display = 'none';
-  buildBoard();
-  status('Select a color, paint cells, toggle arrows, then Solve.', 'info');
-}
-
-// ─── Serialization (for BFS visited set) ──────────────────────
-function serializeBoard(b) {
-  return b.map(cell => {
-    if (cell.t === 'empty') return '   ';
-    if (cell.t === 'wall')  return '###';
-    if (cell.t === 'block') return cell.c + '  ';
-    if (cell.t === 'chain') return cell.c + cell.n + ' ';
-    if (cell.t === 'key')   return cell.c + 'K ';
-    return '   ';
-  }).join('');
-}
-
-// ─── Slide Simulation ─────────────────────────────────────────
-function isMoveable(cell) { return cell.t === 'block' || cell.t === 'key'; }
-
-function slideBoard(b, move) {
-  // move: { dir:'L'|'R'|'U'|'D', idx: row or col index }
-  const nb = cloneBoard(b);
-  const { dir, idx } = move;
-
-  if (dir === 'L' || dir === 'R') {
-    const row = idx;
-    let line = [];
-    for (let c = 0; c < N; c++) line.push(nb[row * N + c]);
-    line = slideLine(line, dir === 'L');
-    for (let c = 0; c < N; c++) nb[row * N + c] = line[c];
-  } else {
-    const col = idx;
-    let line = [];
-    for (let r = 0; r < N; r++) line.push(nb[r * N + col]);
-    line = slideLine(line, dir === 'U');
-    for (let r = 0; r < N; r++) nb[r * N + col] = line[r];
-  }
-  return nb;
-}
-
-function slideLine(line, towardStart) {
-  const n = line.length;
-  const result = line.map(c => ({ ...c }));
-  const step = towardStart ? -1 : 1;
-  const order = towardStart
-    ? Array.from({length:n}, (_,i) => i)
-    : Array.from({length:n}, (_,i) => n-1-i);
-
-  for (const pos of order) {
-    if (!isMoveable(result[pos])) continue;
-    let block = { ...result[pos] };
-    result[pos] = emptyCell();
-
-    let dest = pos, cur = pos + step, exits = true;
-    while (cur >= 0 && cur < n) {
-      const target = result[cur];
-      if (target.t === 'empty') { dest = cur; cur += step; continue; }
-      exits = false;
-      if (target.t === 'chain' && block.t === 'key') {
-        const n2 = target.n - 1;
-        result[cur] = n2 <= 0 ? blockCell(target.c) : chainCell(target.c, n2);
-        block = blockCell(block.c);
-      }
-      break;
-    }
-    if (!exits) result[dest] = block;
-  }
-  return result;
-}
-
-// ─── Win Condition ────────────────────────────────────────────
-function isWon(b) {
-  return b.every(cell => cell.t === 'empty' || cell.t === 'wall');
-}
-
-// ─── BFS Solver ──────────────────────────────────────────────
-function getMoves() {
-  const moves = [];
-  for (const key of Object.keys(arrows)) {
-    if (!arrows[key]) continue;
-    const dir = key[0]; // L/R/U/D
-    const idx = parseInt(key.slice(1));
-    moves.push({ dir, idx, label: `${{L:'Left',R:'Right',U:'Up',D:'Down'}[dir]} — ${dir==='L'||dir==='R'?'row':'column'} ${idx+1}` });
-  }
-  return moves;
-}
-
-async function solve() {
-  const moveSet = getMoves();
-  if (moveSet.length === 0) { status('No arrows toggled — click edge buttons to add arrows.', 'err'); return; }
-
-  const hasBlocks = cells.some(c => c.t === 'block' || c.t === 'key' || c.t === 'chain');
-  if (!hasBlocks) { status('Board is empty — paint some blocks first.', 'err'); return; }
-
-  if (isWon(cells)) { status('Board is already cleared!', 'ok'); return; }
-
-  status('Solving… (BFS up to 14 moves)', 'info');
-  await new Promise(r => setTimeout(r, 10)); // let UI update
-
-  const MAX_DEPTH = 14;
-  const startKey = serializeBoard(cells);
-  const visited = new Set([startKey]);
-  // BFS: [board, path]
-  let queue = [[cloneBoard(cells), []]];
-  let found = null;
-  const t0 = performance.now();
-
-  outer: while (queue.length > 0) {
-    if (performance.now() - t0 > 5000) break;
-    const nextQueue = [];
-    for (const [board, path] of queue) {
-      for (const move of moveSet) {
-        const nb = slideBoard(board, move);
-        const key = serializeBoard(nb);
-        if (visited.has(key)) continue;
-        visited.add(key);
-        const newPath = [...path, move];
-        if (isWon(nb)) { found = newPath; break outer; }
-        if (newPath.length < MAX_DEPTH) nextQueue.push([nb, newPath]);
-      }
-    }
-    queue = nextQueue;
-  }
-
-  const ms = (performance.now() - t0).toFixed(0);
-  if (found) {
-    showSolution(found);
-    status(`✓ Solved in ${found.length} moves (${ms}ms)`, 'ok');
-  } else {
-    status(`No solution found within ${MAX_DEPTH} moves (${ms}ms) — check arrows & board.`, 'err');
-  }
-}
-
-// ─── Solution Display ─────────────────────────────────────────
-let solSteps = []; // [{move, board}]
-let solStep = 0;
-
-function showSolution(path) {
-  solSteps = [{ move: null, board: cloneBoard(cells) }];
-  let b = cloneBoard(cells);
-  for (const move of path) {
-    b = slideBoard(b, move);
-    solSteps.push({ move, board: cloneBoard(b) });
-  }
-  solStep = 0;
-
-  const panel = document.getElementById('solution-panel');
-  panel.style.display = 'block';
-  document.getElementById('step-count').textContent = path.length;
-
-  const list = document.getElementById('step-list');
-  list.innerHTML = '';
-  path.forEach((move, i) => {
-    const div = document.createElement('div');
-    div.className = 'step';
-    div.dataset.step = i + 1;
-    div.innerHTML = `
-      <div class="step-num">${i+1}</div>
-      <div class="step-arrow">${ARROW_CHARS[move.dir]}</div>
-      <div class="step-desc">${move.label}</div>`;
-    div.addEventListener('click', () => goToStep(i + 1));
-    list.appendChild(div);
-  });
-
-  goToStep(0);
-}
-
-function goToStep(n) {
-  solStep = Math.max(0, Math.min(n, solSteps.length - 1));
-  document.querySelectorAll('.step').forEach((el, i) => {
-    el.classList.toggle('current', i + 1 === solStep);
-  });
-  document.getElementById('step-label').textContent = `Step ${solStep} / ${solSteps.length - 1}`;
-  // Show board state for this step
-  renderSolBoard(solSteps[solStep].board);
-}
-
-function renderSolBoard(b) {
-  // Re-render the main board with solution board state
-  const gridEl = document.getElementById('board-grid');
-  if (!gridEl) return;
-  const cellEls = gridEl.querySelectorAll('.cell');
-  b.forEach((cell, i) => {
-    if (cellEls[i]) applyCellStyle(cellEls[i], cell);
-  });
-}
-
-// ─── Board Rendering ──────────────────────────────────────────
-function buildBoard() {
-  const outer = document.getElementById('board-outer');
-  outer.innerHTML = '';
-
-  // Layout: corner | top-arrows | corner
-  //         left-arrows | grid | right-arrows
-  //         corner | bottom-arrows | corner
-
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'display:inline-grid; gap:4px; grid-template-columns: 30px auto 30px; grid-template-rows: 30px auto 30px;';
-
-  // Top arrows row
-  const topRow = makeArrowRow('U');
-  const botRow = makeArrowRow('D');
-  const leftCol = makeArrowCol('L');
-  const rightCol = makeArrowCol('R');
-
-  // Main grid
-  const gridEl = document.createElement('div');
-  gridEl.id = 'board-grid';
-  gridEl.className = 'board-grid';
-  gridEl.style.gridTemplateColumns = `repeat(${N}, 44px)`;
-
-  for (let i = 0; i < N * N; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'cell';
-    cell.dataset.i = i;
-    applyCellStyle(cell, cells[i]);
-    cell.addEventListener('click', () => paintCell(i));
-    gridEl.appendChild(cell);
-  }
-
-  // Assemble layout
-  const tl = corner(), tr = corner(), bl = corner(), br = corner();
-
-  wrap.appendChild(tl);
-  wrap.appendChild(topRow);
-  wrap.appendChild(tr);
-  wrap.appendChild(leftCol);
-  wrap.appendChild(gridEl);
-  wrap.appendChild(rightCol);
-  wrap.appendChild(bl);
-  wrap.appendChild(botRow);
-  wrap.appendChild(br);
-
-  outer.appendChild(wrap);
-}
-
-function corner() {
-  const d = document.createElement('div');
-  d.className = 'corner';
-  return d;
-}
-
-function makeArrowRow(dir) {
-  // dir = 'U' or 'D' — one button per column
-  const row = document.createElement('div');
-  row.style.cssText = `display:grid; grid-template-columns:repeat(${N},44px); gap:2px;`;
-  for (let c = 0; c < N; c++) {
-    const btn = document.createElement('button');
-    btn.className = 'arr-btn';
-    btn.textContent = ARROW_CHARS[dir];
-    btn.title = `${dir==='U'?'Up':'Down'} arrow on column ${c+1}`;
-    const key = `${dir}${c}`;
-    btn.classList.toggle('active', !!arrows[key]);
-    btn.addEventListener('click', () => toggleArrow(key, btn));
-    row.appendChild(btn);
-  }
-  return row;
-}
-
-function makeArrowCol(dir) {
-  // dir = 'L' or 'R' — one button per row
-  const col = document.createElement('div');
-  col.style.cssText = `display:grid; grid-template-rows:repeat(${N},44px); gap:2px;`;
-  for (let r = 0; r < N; r++) {
-    const btn = document.createElement('button');
-    btn.className = 'arr-btn side';
-    btn.textContent = ARROW_CHARS[dir];
-    btn.title = `${dir==='L'?'Left':'Right'} arrow on row ${r+1}`;
-    const key = `${dir}${r}`;
-    btn.classList.toggle('active', !!arrows[key]);
-    btn.addEventListener('click', () => toggleArrow(key, btn));
-    col.appendChild(btn);
-  }
-  return col;
-}
-
-function toggleArrow(key, btn) {
-  arrows[key] = !arrows[key];
-  btn.classList.toggle('active', arrows[key]);
-}
-
-function applyCellStyle(el, cell) {
-  el.className = 'cell ' + (cell.t === 'empty' ? 'empty' : cell.t);
-  el.innerHTML = '';
-  el.style.background = '';
-  el.style.borderColor = '';
-  el.style.color = '';
-
-  if (cell.t === 'wall') {
-    el.style.background = '#1e293b';
-    el.style.borderColor = '#334155';
-    el.textContent = '▪';
-    el.style.color = '#475569';
-  } else if (cell.t === 'block') {
-    const idx = COLOR_KEYS.indexOf(cell.c);
-    el.style.background = BLOCK_COLORS[idx] || '#888';
-    el.style.color = '#fff';
-    el.textContent = LABEL_MAP[cell.c] || '?';
-  } else if (cell.t === 'chain') {
-    const idx = COLOR_KEYS.indexOf(cell.c);
-    el.style.background = (BLOCK_COLORS[idx] || '#888') + '44';
-    el.style.borderColor = BLOCK_COLORS[idx] || '#888';
-    el.style.color = BLOCK_COLORS[idx] || '#888';
-    el.innerHTML = `<div class="chain-count">${cell.n}</div><div class="chain-icon">🔗</div>`;
-  } else if (cell.t === 'key') {
-    const idx = COLOR_KEYS.indexOf(cell.c);
-    el.style.background = BLOCK_COLORS[idx] || '#888';
-    el.style.color = '#fff';
-    el.innerHTML = `<div class="key-icon">🗝️</div><div class="key-label">${LABEL_MAP[cell.c]}</div>`;
-  }
-}
-
-function paintCell(i) {
-  let newCell;
-  if (selMod === 'erase') newCell = emptyCell();
-  else if (selMod === 'wall') newCell = wallCell();
-  else if (selMod === 'chain') newCell = chainCell(selColor, parseInt(document.getElementById('chain-count').value) || 1);
-  else if (selMod === 'key') newCell = keyCell(selColor);
-  else newCell = blockCell(selColor);
-
-  cells[i] = newCell;
-  // Re-apply to cell element
-  const gridEl = document.getElementById('board-grid');
-  if (gridEl) applyCellStyle(gridEl.children[i], newCell);
-  // Clear solution
-  document.getElementById('solution-panel').style.display = 'none';
-}
-
-// ─── Palette ──────────────────────────────────────────────────
-function buildPalette() {
-  const el = document.getElementById('palette');
-  el.innerHTML = '';
-  for (let i = 0; i < COLOR_KEYS.length; i++) {
-    const chip = document.createElement('div');
-    chip.className = 'tool-chip' + (COLOR_KEYS[i] === selColor ? ' active' : '');
-    chip.style.background = BLOCK_COLORS[i];
-    chip.style.color = '#fff';
-    chip.textContent = LABEL_MAP[COLOR_KEYS[i]];
-    chip.dataset.c = COLOR_KEYS[i];
-    chip.addEventListener('click', () => {
-      selColor = COLOR_KEYS[i];
-      document.querySelectorAll('.tool-chip').forEach(c => c.classList.toggle('active', c.dataset.c === selColor));
-    });
-    el.appendChild(chip);
-  }
-}
-
-// ─── Presets ──────────────────────────────────────────────────
-const PRESETS = {
-  demo: {
-    N: 6,
-    arrows: { 'D2': true, 'R2': true, 'L4': true },
-    board: [
-      'empty','empty','block:g','empty','empty','empty',
-      'empty','empty','block:g','empty','empty','empty',
-      'key:y','empty','empty','chain:r:1','empty','empty',
-      'wall','empty','empty','empty','empty','wall',
-      'empty','block:b','empty','empty','empty','empty',
-      'empty','empty','empty','empty','empty','empty',
-    ],
-  },
-};
-
-function parsePreset(name) {
-  const p = PRESETS[name];
-  if (!p) return;
-  N = p.N;
-  arrows = { ...p.arrows };
-  cells = p.board.map(spec => {
-    if (spec === 'empty') return emptyCell();
-    if (spec === 'wall') return wallCell();
-    const parts = spec.split(':');
-    if (parts[0] === 'block') return blockCell(parts[1]);
-    if (parts[0] === 'chain') return chainCell(parts[1], parseInt(parts[2]));
-    if (parts[0] === 'key') return keyCell(parts[1]);
-    return emptyCell();
-  });
-  buildPalette();
-  buildBoard();
-  status(`Demo preset loaded — click Solve.`, 'info');
-}
-
-// ─── Event Wiring ─────────────────────────────────────────────
-document.getElementById('size-sel').addEventListener('change', function() {
-  init(+this.value);
-});
-document.getElementById('preset-sel').addEventListener('change', function() {
-  if (!this.value) return;
-  parsePreset(this.value);
-  document.getElementById('size-sel').value = N;
-  this.value = '';
-});
-document.getElementById('clear-btn').addEventListener('click', () => {
-  cells.fill(null); cells = new Array(N*N).fill(null).map(emptyCell);
-  arrows = {};
-  document.getElementById('solution-panel').style.display = 'none';
-  buildBoard();
-  status('Cleared.', 'info');
-});
-document.getElementById('solve-btn').addEventListener('click', solve);
-
-document.querySelectorAll('.mod-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    selMod = btn.dataset.mod;
-    document.querySelectorAll('.mod-btn').forEach(b => b.classList.toggle('active', b.dataset.mod === selMod));
-  });
-});
-
-document.getElementById('prev-step').addEventListener('click', () => goToStep(solStep - 1));
-document.getElementById('next-step').addEventListener('click', () => goToStep(solStep + 1));
-
-// ─── Status ───────────────────────────────────────────────────
-function status(msg, cls) {
-  const el = document.getElementById('status');
-  el.textContent = msg; el.className = cls;
-}
-
-// ─── Boot ─────────────────────────────────────────────────────
-buildPalette();
-init(8);
-</script>
+  <script src="engine.js"></script>
+  <script src="detect.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

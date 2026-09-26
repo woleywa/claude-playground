@@ -8,7 +8,7 @@ Multi-project repository. Each project lives in its own subdirectory with its ow
 |---|---|---|
 | Meowdoku Solver | `meowdoku/` | Mobile web tool for solving Meowdoku / LinkedIn Queens-style puzzles |
 | Zlatan          | `zlatan/`   | Quotes and facts from Zlatan Ibrahimović |
-| Block Out Solver | `block-out/` | Shortest-move solver for the Block Out sliding-block puzzle (BFS) |
+| Block Out Solver | `block-out/` | Block Out solver: reads a screenshot, then steps through which piece to drag out of which exit |
 | Yoink           | `yoink/`    | Social media downloader (YouTube/TikTok/Instagram/X) — client-side app + optional backend + MCP server |
 
 ## Rules

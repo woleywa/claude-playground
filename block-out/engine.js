@@ -1,0 +1,164 @@
+// Rules + solver. Pure functions, no DOM.
+// piece: { id, color, r, c, h, w, key, lock, ice }   color '?' = unknown (e.g. still under ice)
+// gate:  { id, side: 'L'|'R'|'T'|'B', start, len, color, frozen }
+// level: { W, H, pieces, gates, tickPerCell }
+// Ice counts down once per piece that leaves (or per cell with tickPerCell);
+// frozen exits count down once per move (every drag, including one that leaves).
+const Engine = (() => {
+  const clone = s => JSON.parse(JSON.stringify(s));
+  const movable = p => !p.ice && !p.lock && p.color !== '?';
+
+  function grid(level, pieces) {
+    const g = new Int32Array(level.W * level.H).fill(-1);
+    for (const p of pieces)
+      for (let r = p.r; r < p.r + p.h; r++)
+        for (let c = p.c; c < p.c + p.w; c++) g[r * level.W + c] = p.id;
+    return g;
+  }
+
+  function fits(level, g, p, r, c) {
+    if (r < 0 || c < 0 || r + p.h > level.H || c + p.w > level.W) return false;
+    for (let y = r; y < r + p.h; y++)
+      for (let x = c; x < c + p.w; x++) {
+        const v = g[y * level.W + x];
+        if (v !== -1 && v !== p.id) return false;
+      }
+    return true;
+  }
+
+  // Every position the piece can be dragged to, with the path to reach it.
+  function reachable(level, g, p) {
+    const seen = new Map([[p.r + ',' + p.c, null]]);
+    const q = [[p.r, p.c]];
+    const out = [];
+    while (q.length) {
+      const [r, c] = q.shift();
+      out.push([r, c]);
+      for (const [dr, dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const k = (r + dr) + ',' + (c + dc);
+        if (seen.has(k) || !fits(level, g, p, r + dr, c + dc)) continue;
+        seen.set(k, [r, c]);
+        q.push([r + dr, c + dc]);
+      }
+    }
+    return out;
+  }
+
+  function gateFor(level, gates, p, r, c) {
+    for (const gt of gates) {
+      if (gt.frozen > 0 || gt.color !== p.color) continue;
+      const end = gt.start + gt.len;
+      if (gt.side === 'L' && c === 0 && r >= gt.start && r + p.h <= end) return gt;
+      if (gt.side === 'R' && c + p.w === level.W && r >= gt.start && r + p.h <= end) return gt;
+      if (gt.side === 'T' && r === 0 && c >= gt.start && c + p.w <= end) return gt;
+      if (gt.side === 'B' && r + p.h === level.H && c >= gt.start && c + p.w <= end) return gt;
+    }
+    return null;
+  }
+
+  function findExit(level, st) {
+    const g = grid(level, st.pieces);
+    for (const p of st.pieces) {
+      if (!movable(p)) continue;
+      for (const [r, c] of reachable(level, g, p)) {
+        const gt = gateFor(level, st.gates, p, r, c);
+        if (gt) return { pieceId: p.id, r, c, gateId: gt.id };
+      }
+    }
+    return null;
+  }
+
+  function applyExit(level, st, pieceId) {
+    const p = st.pieces.find(x => x.id === pieceId);
+    st.pieces = st.pieces.filter(x => x.id !== pieceId);
+    const tick = level.tickPerCell ? p.h * p.w : 1;
+    for (const q of st.pieces) {
+      if (q.ice) q.ice = Math.max(0, q.ice - tick);
+      if (p.key && q.lock && q.color === p.color) q.lock--;
+    }
+    thaw(st.gates);
+  }
+
+  const thaw = gates => gates.forEach(gt => { if (gt.frozen) gt.frozen--; });
+  const moveTo = (st, id, r, c) => {
+    const s2 = { pieces: st.pieces.map(x => x.id === id ? { ...x, r, c } : x), gates: clone(st.gates) };
+    thaw(s2.gates);
+    return s2;
+  };
+
+  // No piece can exit directly: find the fewest repositionings that let one exit.
+  function findUnblock(level, st, deadline) {
+    const key = s => s.pieces.map(p => p.r + ',' + p.c).join('|') + '#' + s.gates.map(g => g.frozen).join(',');
+    const seen = new Set([key(st)]);
+    let frontier = [{ st, moves: [] }];
+    for (let depth = 0; depth < 3 && frontier.length; depth++) {
+      const next = [];
+      for (const node of frontier) {
+        const g = grid(level, node.st.pieces);
+        for (const p of node.st.pieces) {
+          if (!movable(p)) continue;
+          for (const [r, c] of reachable(level, g, p)) {
+            if (r === p.r && c === p.c) continue;
+            if (performance.now() > deadline) return null;
+            const s2 = moveTo(node.st, p.id, r, c);
+            const k = key(s2);
+            if (seen.has(k)) continue;
+            seen.add(k);
+            const moves = [...node.moves, { pieceId: p.id, fromR: p.r, fromC: p.c, r, c }];
+            if (findExit(level, s2)) return { st: s2, moves };
+            next.push({ st: s2, moves });
+          }
+        }
+      }
+      frontier = next;
+    }
+    return null;
+  }
+
+  // Exits only ever help (free space, tick counters, open locks) and drags are
+  // reversible, so exiting whatever can exit next never blocks a solution.
+  function solve(level, timeMs = 4000) {
+    const deadline = performance.now() + timeMs;
+    let st = { pieces: clone(level.pieces), gates: clone(level.gates) };
+    const steps = [];
+    while (true) {
+      if (!st.pieces.some(p => p.color !== '?')) {
+        return { ok: true, steps, final: st };
+      }
+      const ex = findExit(level, st);
+      if (ex) {
+        const p = st.pieces.find(x => x.id === ex.pieceId);
+        steps.push({ kind: 'exit', before: clone(st), pieceId: p.id, fromR: p.r, fromC: p.c, r: ex.r, c: ex.c, gateId: ex.gateId });
+        applyExit(level, st, p.id);
+        continue;
+      }
+      const un = findUnblock(level, st, deadline);
+      if (un) {
+        for (const mv of un.moves) {
+          steps.push({ kind: 'move', before: clone(st), ...mv });
+          st = moveTo(st, mv.pieceId, mv.r, mv.c);
+        }
+        continue;
+      }
+      // A thawed exit or piece with an unknown colour: the player has to look before going on.
+      if (st.gates.some(g => !g.frozen && g.color === '?') || st.pieces.some(p => !p.ice && p.color === '?'))
+        return { ok: false, steps, final: st };
+      // Still stuck: spend moves shuffling one piece back and forth until the next exit thaws.
+      const wait = Math.min(...st.gates.filter(g => g.frozen).map(g => g.frozen));
+      const g = grid(level, st.pieces);
+      const p = st.pieces.find(x => movable(x) && reachable(level, g, x).length > 1);
+      if (!isFinite(wait) || !p) return { ok: false, steps, final: st };
+      const [ar, ac] = reachable(level, g, p)[1];
+      for (let i = 0; i < wait; i++) {
+        const cur = st.pieces.find(x => x.id === p.id);
+        const [r, c] = i % 2 ? [p.r, p.c] : [ar, ac];
+        steps.push({ kind: 'move', wait: true, before: clone(st), pieceId: p.id, fromR: cur.r, fromC: cur.c, r, c });
+        st = moveTo(st, p.id, r, c);
+      }
+    }
+  }
+
+  return { solve, movable };
+})();
+
+if (typeof module !== 'undefined') module.exports = Engine;
