@@ -198,6 +198,7 @@ function pieceEl(p, r0, c0, cs, g, ghost) {
   if (p.ice) bits.push((p.crate ? '📦' : '❄') + p.ice);
   if (p.lock) bits.push('🔒' + p.lock);
   if (p.key) bits.push('🗝️');
+  if (p.item) bits.push(p.item === 'battery' ? '🔋' : '🚀');
   if (p.color === '?' && !p.ice) bits.push('?');
   if (bits.length) {
     const mr = offs.reduce((s, q) => s + q[0], 0) / offs.length, mc = offs.reduce((s, q) => s + q[1], 0) / offs.length;
@@ -523,7 +524,17 @@ function describe(s) {
     const gt = s.before.gates.find(x => x.id === s.gateId);
     return `${name} → out the ${SIDE[gt.side]} exit` + (p.inner ? ` (the ${NAMES[p.inner].toLowerCase()} core stays)` : '');
   }
-  return `Move ${name} → row ${s.r + 1}, col ${s.c + 1}` + (s.wait ? ' (to thaw an exit)' : '');
+  return `Move ${name} → row ${s.r + 1}, col ${s.c + 1}` + (s.wait ? ' (any move works: this just thaws an exit)' : '');
+}
+
+// What the player must look at before the solver can go on (colours still hidden), or ''.
+function needsLook(st) {
+  const pieces = st.pieces.filter(p => p.color === '?' && !p.ice).length;
+  const exits = st.gates.filter(gt => gt.color === '?' && !gt.frozen).length;
+  const bits = [];
+  if (exits) bits.push(`${exits} frozen exit${exits > 1 ? 's have' : ' has'} thawed`);
+  if (pieces) bits.push(`${pieces} hidden piece${pieces > 1 ? 's are' : ' is'} uncovered`);
+  return bits.length ? `${bits.join(' and ')}, and ${exits + pieces > 1 ? 'their colours' : 'its colour'} can't be seen in this one.` : '';
 }
 
 function stuckReason(st) {
@@ -552,6 +563,8 @@ $('solve').addEventListener('click', () => {
     const hidden = res.final.pieces.length;
     if (res.ok && !hidden) status(`✓ Solved: ${res.steps.length} steps (${ms} ms).`, 'ok');
     else if (res.ok) status(`All known pieces cleared in ${res.steps.length} steps. ${hidden} hidden piece${hidden > 1 ? 's' : ''} left: import a new screenshot once they show.`, 'ok');
+    else if (needsLook(res.final)) status(`Play ${res.steps.length === 1 ? 'this move' : `these ${res.steps.length} moves`}` +
+      (exits ? ` (${exits} piece${exits === 1 ? '' : 's'} out)` : '') + `, then take a new screenshot: ${needsLook(res.final)}`, 'ok');
     else status(`${res.steps.length} steps (${exits} piece${exits === 1 ? '' : 's'} out), then stuck. ${stuckReason(res.final)}`, 'err');
     openSolution();
   }, 20);
@@ -569,7 +582,7 @@ function openSolution() {
     li.addEventListener('click', () => { stopPlay(); goStep(i); });
     ol.appendChild(li);
   });
-  const end = el('li'); end.textContent = sol.ok ? 'Done' : 'Stuck here';
+  const end = el('li'); end.textContent = sol.ok ? 'Done' : needsLook(sol.final) ? 'Take a new screenshot' : 'Stuck here';
   end.addEventListener('click', () => { stopPlay(); goStep(sol.steps.length); });
   ol.appendChild(end);
   goStep(0);
@@ -580,7 +593,8 @@ function goStep(i) {
   stepIdx = Math.max(0, Math.min(sol.steps.length, i));
   [...$('steps').children].forEach((li, k) => li.classList.toggle('on', k === stepIdx));
   const s = sol.steps[stepIdx];
-  $('step-text').textContent = s ? `${stepIdx + 1}/${sol.steps.length}: ${describe(s)}` : (sol.ok ? 'Board after all steps' : 'Stuck here');
+  $('step-text').textContent = s ? `${stepIdx + 1}/${sol.steps.length}: ${describe(s)}`
+    : sol.ok ? 'Board after all steps' : needsLook(sol.final) ? '📷 Now take a new screenshot' : 'Stuck here';
   render();
 }
 

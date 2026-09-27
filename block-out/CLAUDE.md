@@ -22,7 +22,8 @@ Vanilla HTML + CSS + JS, no build step, no dependencies. Hosted on GitHub Pages 
 - A piece with a key opens the lock of its **own colour** when it leaves.
 - Layered piece (`inner`): the outer colour leaves through its exit; the core piece stays where it was.
 - Tracks (`level.tracks` = `[r, c, colour]`, hollow outlined cells): only pieces of that colour may cross.
-- Battery icon on a piece = time bonus only; the solver ignores it.
+- Items on pieces (`item: 'battery'` = time bonus, `'rocket'`) are shown but don't affect solving.
+- Walls can also sit inside the board (raised frame-coloured blocks, e.g. Level 207).
 - Crates (`crate: true`, colour `'?'`): count down like ice; contents are unknown until they open (usually more pieces).
 - Colours under ice, inside crates and of frozen exits are unknown (`'?'`) until they thaw.
 
@@ -50,7 +51,9 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
   Seams = a thin line < 60% as bright as the faces beside it, sampled away from the border's middle
   (keys sit there). Ice blocks touch without seams, so they're split by where their digits sit.
   Seam also = ≥90% of the border <80% as bright (3D edge between stacked pieces).
-  Padlock = icon cell on a piece colour with gold + a red/blue badge near its middle. Key = gold + gem.
+  Padlock = icon cell on a piece colour with gold + a red/blue badge near its middle. Icons at a piece's
+  centre (own cells only, core colour ignored): key = mostly gold + a red/blue gem, battery = purple,
+  rocket = mostly red. Frame-coloured groups are crates only with an orange/red rim, else walls.
   Layered = per-cell 7×7 colour histogram with two unrelated colours (shading partners folded in),
   the rim colour is outer, the centre colour the core. Track = olive cell average; its rim gives the
   colour. Frozen tiles spanning several cells have no gap between them.
@@ -61,5 +64,7 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
 - "Small demo" preset → ✓ Solved: 5 steps.
 - "Level 198" preset → 10 steps, then stuck waiting for 3 thawed exit colours.
 - "Level 204" preset → 5 wait moves, then stuck waiting for the thawed right exit's colour.
+- Level 207 screenshot → 7×9, 18 pieces, 4 exits, wall column, 2 batteries, 1 rocket; solve = 1 thaw move,
+  then "take a new screenshot" (3 frozen exits thaw with unknown colours).
 - "Level 205" preset → 14 steps (yellow pieces use the tracks), then waits for the thawed top exit.
 - Importing the Level 198 / 204 / 205 screenshots: 7×10 (31 pieces, 11 exits) / 7×10 (14, 5) / 7×8 (14, 4 + 24 tracks).

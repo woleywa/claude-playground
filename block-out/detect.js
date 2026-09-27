@@ -391,13 +391,29 @@ const Detect = (() => {
       const cores = cells.map(i => layer[i]).filter(Boolean);
       const inner = !hidden && cores.length / cells.length >= 0.5 ? vote(cores) : null;
       if (!hidden && h * w === 1 && lockCell[r * W + c]) p.lock = 1;
-      else if (!hidden && !['yellow', 'orange'].includes(label) && !['yellow', 'orange'].includes(inner)) {
+      else if (!hidden) {
+        // Icons sit on the piece's centre: a key is mostly gold with a small red/blue gem, a battery
+        // (time bonus) is a purple can, a rocket is mostly red. Only the piece's own cells count.
+        const own = new Set(cells);
         const mx = rect.x + (c + w / 2) * cw, my = rect.y + (r + h / 2) * ch;
-        // A key: gold with a coloured gem (red or blue) near the piece's centre.
-        const spots = [[0,0],[-.12,0],[.12,0],[0,-.12],[0,.12],[-.2,-.1],[.1,.2],[-.1,.2],[.2,-.1],[.15,-.2],[-.15,.2]]
-          .map(([dx, dy]) => at(mx + dx*cw, my + dy*ch, rad));
-        const gem = ([R, G, B]) => (R > 170 && G < 80) || (label !== 'blue' && label !== 'sky' && B > 170 && R < 90 && G < 170);
-        if (spots.some(gold) && spots.some(gem)) p.key = true;
+        const n = { gold: 0, red: 0, blue: 0, purple: 0 };
+        for (let i = -3; i <= 3; i++)
+          for (let j = -3; j <= 3; j++) {
+            const x = mx + i * 0.1 * cw, y = my + j * 0.1 * ch;
+            const cc = Math.floor((x - rect.x) / cw), rr = Math.floor((y - rect.y) / ch);
+            if (!own.has(rr * W + cc)) continue;
+            const v = at(x, y, rad);
+            // A layered piece's core colour is not an icon.
+            const not = (...ks) => !ks.includes(label) && !ks.includes(inner);
+            if (gold(v)) n.gold++;
+            else if (v[0] > 170 && v[1] < 80 && not('red', 'pink', 'orange')) n.red++;
+            else if (v[2] > 170 && v[0] < 90 && v[1] < 170 && not('blue', 'sky')) n.blue++;
+            if (not('purple') && classify(v) === 'purple') n.purple++;
+          }
+        const plainGold = ['yellow', 'orange'].includes(label) || ['yellow', 'orange'].includes(inner);
+        if (n.purple >= 4) p.item = 'battery';
+        else if (!plainGold && n.gold >= 4 && n.red + n.blue >= 1 && n.gold >= n.red + n.blue) p.key = true;
+        else if (n.red >= 4) p.item = 'rocket';
       }
       // Layered piece: most of its cells showed the same second colour inside.
       if (inner && !p.key && !p.lock) p.inner = inner;
@@ -438,8 +454,21 @@ const Detect = (() => {
       return out;
     };
 
+    // Crates have an orange/red rim; a plain frame-coloured block inside the board is a wall.
+    const rimmed = cells => {
+      const rs = cells.map(i => Math.floor(i / W)), cs = cells.map(i => i % W);
+      const x0 = rect.x + Math.min(...cs) * cw, x1 = rect.x + (Math.max(...cs) + 1) * cw;
+      const y0 = rect.y + Math.min(...rs) * ch, y1 = rect.y + (Math.max(...rs) + 1) * ch;
+      const d = 0.07 * cw, pts = [];
+      for (let t = 0.1; t < 0.95; t += 0.2) {
+        pts.push([x0 + (x1 - x0) * t, y0 + d], [x0 + (x1 - x0) * t, y1 - d], [x0 + d, y0 + (y1 - y0) * t], [x1 - d, y0 + (y1 - y0) * t]);
+      }
+      return pts.filter(([x, y]) => ['orange', 'yellow', 'red'].includes(classify(at(x, y, rad)))).length / pts.length >= 0.3;
+    };
+
     for (const [, cells] of groups) {
       const label = cls[cells[0]];
+      if (label === 'crate' && !rimmed(cells)) { cells.forEach(i => walls.push([Math.floor(i / W), i % W])); continue; }
       if (label === 'ice') splitIce(cells).forEach(cv => addPiece(cv, 'ice'));
       else addPiece(cells, label);
     }
