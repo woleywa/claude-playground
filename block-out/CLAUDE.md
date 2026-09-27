@@ -26,6 +26,9 @@ Vanilla HTML + CSS + JS, no build step, no dependencies. Hosted on GitHub Pages 
 - Tracks (`level.tracks` = `[r, c, colour]`, hollow outlined cells): only pieces of that colour may cross.
 - Items on pieces (`item: 'battery'` = time bonus, `'rocket'`) are shown but don't affect solving.
 - Walls can also sit inside the board (raised frame-coloured blocks, e.g. Level 207).
+- Arrow pieces (`axis: 'h'|'v'`, flat face with a big ⇔/⇕): move and leave only along the arrow.
+- Star pieces (`star`, cream star studs) leave only through star exits (`gate.star`); normal pieces
+  may use star exits too (Level 211).
 - Crates (`crate: true`, colour `'?'`): count down like ice; contents are unknown until they open (usually more pieces).
 - Colours under ice, inside crates and of frozen exits are unknown (`'?'`) until they thaw.
 
@@ -68,7 +71,12 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
   rocket = mostly red. Frame-coloured groups are crates only with an orange/red rim, else walls.
   Layered = per-cell 7×7 colour histogram with two unrelated colours (shading partners folded in),
   the rim colour is outer, the centre colour the core. Track = olive cell average; its rim gives the
-  colour. Frozen tiles spanning several cells have no gap between them.
+  colour. Frozen tiles spanning several cells: split only where a strip of frame shows between tiles.
+  Exit colour = nearest piece colour of the darker 60% of coloured samples (exits are two-tone and
+  carry a white arrow). Star cell = ≥12% pale unsaturated pixels spread over 3+ quarters (a centred
+  icon isn't); colour from the non-pale pixels; starry cells among crate cells are crate (moons).
+  Arrow piece = studless face (low gradient texture); axis from how its edges spread vs its box.
+  When one side of the frame is all exits, its edge is mirrored and snapped to the other axis's cells.
 - Numbers are not OCR'd — the user types them.
 
 ## Testing
@@ -78,5 +86,6 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
 - "Level 204" preset → 5 out in ~1 s, then the right exit thaws with an unknown colour.
 - Level 207 start screenshot (counters 4/7/7/7, crate 7) → 24 pieces, 5 exits; solve ≈ 20 s → 107 moves,
   6 out, then "take a new screenshot" (top-left exit thawed). With that exit set to purple: 75 moves, 8 out.
+- Level 211 screenshots → 7×9; later state: 12 of 15 out, then two thawed exits need a screenshot.
 - "Level 205" preset (top exit 10) → 10 pieces out, then the top exit thaws with an unknown colour.
 - Importing the Level 198 / 204 / 205 screenshots: 7×10 (31 pieces, 11 exits) / 7×10 (14, 5) / 7×8 (14, 4 + 24 tracks).

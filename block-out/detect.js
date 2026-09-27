@@ -7,10 +7,10 @@ const Detect = (() => {
     pink:   'e34098 e43e96 eb439f e9409b e63e98 ec44a0',
     yellow: 'e8ab0a eeae0b e2a310',
     sky:    '1193e1 1296e6',
-    lime:   '6dbf0e 6fc20e',
+    lime:   '6dbf0e 6fc20e 6fc701',
     blue:   '1051d2 1158d8 0554e3 0254ee',
     purple: '8c30d9 9333e2 8d2fde 9e36f2',
-    green:  '12b370 15bb77 08ba79 0a8315',
+    green:  '12b370 15bb77 08ba79 0a8315 009310 087717',
     red:    'df2b1f f52824',
     orange: 'ed5f09',
     ice:    '0676f3 10b5f7',
@@ -19,8 +19,9 @@ const Detect = (() => {
     track:  '665941 62563d 685b43 6b5e48 5e533f',
     frame:  '4b41ab 463ea2 4a40aa',
     frozen: 'd8e6f2 c8d8ea cce3ef c3e2ed',
+    white:  'f0ece8 eadccf e1c9c8 f4f4f4',
   }).map(([k, v]) => [k, v.split(' ').map(hex)]));
-  const NOT_PIECE = new Set(['empty', 'frame', 'frozen', 'track']);
+  const NOT_PIECE = new Set(['empty', 'frame', 'frozen', 'track', 'white']);
   const SOLID = new Set(['pink', 'yellow', 'sky', 'lime', 'blue', 'purple', 'green', 'red', 'orange']);
   // Colour pairs that shading alone can produce inside one plain piece.
   const PARTNER = { yellow: ['orange'], orange: ['yellow', 'red'], red: ['orange', 'pink'], pink: ['red', 'purple'],
@@ -38,6 +39,11 @@ const Detect = (() => {
     return { name: best, dist: bd };
   }
   const classify = rgb => nearest(rgb).name;
+  const nearestSolid = rgb => {
+    let best = null, bd = Infinity;
+    for (const k of SOLID) for (const ref of REF[k]) { const d = dist(rgb, ref); if (d < bd) { bd = d; best = k; } }
+    return best;
+  };
 
   function sampler(img) {
     const { width: W, height: H, data } = img;
@@ -124,7 +130,8 @@ const Detect = (() => {
       grew = false;
       comps.forEach((c, k) => {
         if (used.has(k) || c.n < comps[0].n * 0.05) return;
-        const m = 0.5 * Math.max(best.x1 - best.x0, best.y1 - best.y0);
+        // Frozen tiles can cover most of the frame, leaving only corner pieces far apart.
+        const m = Math.max(best.x1 - best.x0, best.y1 - best.y0, 0.4 * bw);
         if (c.x1 < best.x0 - m || c.x0 > best.x1 + m || c.y1 < best.y0 - m || c.y0 > best.y1 + m) return;
         used.add(k); grew = true; best.n += c.n;
         best.x0 = Math.min(best.x0, c.x0); best.y0 = Math.min(best.y0, c.y0);
@@ -146,11 +153,13 @@ const Detect = (() => {
       while (k < 2 * B && !frameAt(x + dx * k, y + dy * k)) k++;
       if (k >= 2 * B) return null;
       let miss = 0, last = k;
+      const first = k;
       for (; k < limit; k++) {
         if (frameAt(x + dx * k, y + dy * k)) { miss = 0; last = k; }
         else if (++miss > gapOk) break;
       }
-      if (k >= limit) return null;
+      // A run much longer than a frame is thick means the line runs along the frame, not across it.
+      if (k >= limit || last - first > 0.15 * Math.max(O.x1 - O.x0, O.y1 - O.y0)) return null;
       k = last + 1;
       const end = k + bevel;
       while (k < end && shadow(px(x + dx * k, y + dy * k))) k++;
@@ -172,15 +181,36 @@ const Detect = (() => {
       const t = scan(x, O.y0, 0, 1, H0 / 2); T.push(t === null ? null : O.y0 + t);
       const d = scan(x, O.y1 - 1, 0, -1, H0 / 2); D.push(d === null ? null : O.y1 - 1 - d);
     }
-    const gx0 = edge(L, 'min'), gx1 = edge(R, 'max'), gy0 = edge(T, 'min'), gy1 = edge(D, 'max');
+    let gx0 = edge(L, 'min'), gx1 = edge(R, 'max'), gy0 = edge(T, 'min'), gy1 = edge(D, 'max');
+    // A side made entirely of exits has no plain frame to measure: mirror the opposite side
+    // (roughly), then let the other axis's cell size place it exactly.
+    const mirX = gx0 === null || gx1 === null, mirY = gy0 === null || gy1 === null;
+    if (mirX && mirY) return null;
+    if (gx0 === null && gx1 !== null) gx0 = O.x0 + (O.x1 - 1 - gx1);
+    if (gx1 === null && gx0 !== null) gx1 = O.x1 - 1 - (gx0 - O.x0);
+    if (gy0 === null && gy1 !== null) gy0 = O.y0 + (O.y1 - 1 - gy1);
+    if (gy1 === null && gy0 !== null) gy1 = O.y1 - 1 - (gy0 - O.y0);
+    const leftMir = edge(L, 'min') === null, topMir = edge(T, 'min') === null;
     if ([gx0, gx1, gy0, gy1].some(v => v === null)) return null;
     const Wg = gx1 - gx0 + 1, Hg = gy1 - gy0 + 1;
 
     const lum = ([r, g, b]) => r * 0.3 + g * 0.59 + b * 0.11;
     const cands = [];
-    for (let n = 3; n <= 12; n++) {
+    const tries = [];
+    if (mirX) for (let m = 3; m <= 16; m++) {
+      const cs = Hg / m, n = Math.round(Wg / cs);
+      if (n < 3 || n > 12 || Math.abs(Wg / cs - n) > 0.35) continue;
+      tries.push({ n, m, cs, x0: leftMir ? gx1 + 1 - n * cs : gx0, y0: gy0, sq: 1 });
+    } else if (mirY) for (let n = 3; n <= 12; n++) {
+      const cs = Wg / n, m = Math.round(Hg / cs);
+      if (m < 3 || m > 16 || Math.abs(Hg / cs - m) > 0.35) continue;
+      tries.push({ n, m, cs, x0: gx0, y0: topMir ? gy1 + 1 - m * cs : gy0, sq: 1 });
+    } else for (let n = 3; n <= 12; n++) {
       const cs = Wg / n, m = Math.round(Hg / cs);
       if (m < 3 || m > 16 || Math.abs(Hg / cs - m) > 0.15) continue;
+      tries.push({ n, m, cs, x0: gx0, y0: gy0, sq: Math.max(0, 1 - Math.abs(Hg / cs - m) / 0.5) });
+    }
+    for (const { n, m, cs, x0: gx0, y0: gy0, sq } of tries) {
       const vals = [];
       // Let each line find its seam within a few % of a cell, so small edge errors don't matter.
       const win = [];
@@ -216,7 +246,7 @@ const Detect = (() => {
         }
       purity /= n * m;
       // Cells are square, so the right count also makes the rows come out (nearly) whole.
-      cands.push({ n, m, score, purity, fit: score * purity * purity * Math.max(0, 1 - Math.abs(Hg / cs - m) / 0.5) });
+      cands.push({ n, m, score, purity, fit: score * purity * purity * sq, rect: { x: gx0, y: gy0, w: n * cs, h: m * cs } });
     }
     if (!cands.length) return null;
     const base = cands.reduce((a, b) => b.fit > a.fit ? b : a);
@@ -224,7 +254,7 @@ const Detect = (() => {
     // seams score about as well, and never prefer an unrelated count.
     const pick = cands.filter(c => c.n % base.n === 0 && c.score >= 0.8 * base.score).sort((a, b) => b.n - a.n)[0];
 
-    return { rect: { x: gx0, y: gy0, w: Wg, h: Hg }, W: pick.n, H: pick.m };
+    return { rect: mirX || mirY ? pick.rect : { x: gx0, y: gy0, w: Wg, h: Hg }, W: pick.n, H: pick.m };
   }
 
   // rect = play grid in image pixels; W×H = cells.
@@ -236,7 +266,14 @@ const Detect = (() => {
 
     // Cell colour = average over most of the cell. An icon (padlock, crate badge) skews the
     // average away from every reference; then the corners, which it doesn't cover, decide.
-    const cls = [], odd = [], lockCell = [], layer = [], trackColor = [];
+    const cls = [], odd = [], lockCell = [], layer = [], trackColor = [], starCell = [];
+    // Star outlines are pale and unsaturated (cream on warm pieces, near-white on blue).
+    const cream = v => { const mx = Math.max(...v), mn = Math.min(...v); return mx - mn < 110 && ((v[0] > 120 && v[1] > 90 && v[0] >= v[2]) || mn > 110); };
+    const creamCount = (x0, y0) => {
+      let n = 0;
+      for (let i = 0; i < 7; i++) for (let j = 0; j < 7; j++) if (cream(at(x0 + (-0.42 + 0.14 * i) * cw, y0 + (-0.42 + 0.14 * j) * ch, rad))) n++;
+      return n / 49;
+    };
     const gold = ([R, G, B]) => R > 150 && G > 80 && G < 200 && B < 60;
     const step = Math.max(1, Math.round(Math.min(cw, ch) / 25));
     for (let r = 0; r < H; r++)
@@ -259,14 +296,19 @@ const Detect = (() => {
         lockCell.push(goldHit);
         let label = m.dist > 45 ? vote(corners) : m.name;
         if (goldHit && label === 'ice') label = 'blue';
-        if (m.name === 'track' && m.dist < 25) label = 'track';
+        if (m.name === 'track' && m.dist < 25 && !(creamCount(cx(c), cy(r)) >= 0.12)) label = 'track';
 
         // Layered piece: two unrelated colours each cover a good part of the cell; the one along
         // the cell's border is the outer layer, the other is the core.
         const hist = {}, rim = {};
+        let creamN = 0;
+        const quad = [0, 0, 0, 0];
+        const face = [0, 0, 0]; let faceN = 0;
         for (let i = 0; i < 7; i++)
           for (let j = 0; j < 7; j++) {
-            const k = classify(at(cx(c) + (-0.42 + 0.14 * i) * cw, cy(r) + (-0.42 + 0.14 * j) * ch, rad));
+            const v = at(cx(c) + (-0.42 + 0.14 * i) * cw, cy(r) + (-0.42 + 0.14 * j) * ch, rad);
+            if (cream(v)) { creamN++; if (i !== 3 && j !== 3) quad[(i > 3 ? 1 : 0) + (j > 3 ? 2 : 0)]++; } else { face[0] += v[0]; face[1] += v[1]; face[2] += v[2]; faceN++; }
+            const k = classify(v);
             hist[k] = (hist[k] || 0) + 1;
             if (i === 0 || i === 6 || j === 0 || j === 6) rim[k] = (rim[k] || 0) + 1;
           }
@@ -279,9 +321,14 @@ const Detect = (() => {
         }
         const top = Object.entries(merged).sort((a, b) => b[1] - a[1]);
         let core = null;
+        // Star piece: cream star outlines over the piece colour; the colour is the strongest one.
+        // Stars fill all four quarters of a cell; an icon (battery) sits in the middle.
+        const starry = creamN / 49 >= 0.12 && faceN > 0 && quad.filter(q => q > 0).length >= 3;
+        if (starry) label = nearestSolid(face.map(v => v / faceN));
+        starCell.push(starry);
         // The core runs through the piece's middle, so it also shows at the cell's centre.
         const mid = vote([[0,0],[.08,0],[-.08,0],[0,.08],[0,-.08]].map(([dx, dy]) => classify(at(cx(c) + dx*cw, cy(r) + dy*ch, rad))));
-        if (!goldHit && label !== 'track' && top.length >= 2 && top[1][1] >= 6 && !(PARTNER[top[0][0]] || []).includes(top[1][0])) {
+        if (!starry && !goldHit && label !== 'track' && top.length >= 2 && top[1][1] >= 6 && !(PARTNER[top[0][0]] || []).includes(top[1][0])) {
           const [a, b] = [top[0][0], top[1][0]];
           const outer = (rim[a] || 0) >= (rim[b] || 0) ? a : b;
           const inner = outer === a ? b : a;
@@ -299,7 +346,7 @@ const Detect = (() => {
     // Cells outside the board (e.g. a staircase edge) are background reachable from the
     // screen edge without crossing the frame; empty cells inside the frame aren't.
     const bk = blocks(img, Math.max(3, Math.round(Math.min(cw, ch) / 6)));
-    const darkB = i => { const [R, G, B] = bk.avg[i]; return R + G + B < 230 && B < 130; };
+    const darkB = i => { const [R, G, B] = bk.avg[i]; return R + G + B < 230 && B < 130 && B >= Math.max(R, G); };
     const border = [];
     for (let x = 0; x < bk.bw; x++) border.push(x, (bk.bh - 1) * bk.bw + x);
     for (let y = 0; y < bk.bh; y++) border.push(y * bk.bw, y * bk.bw + bk.bw - 1);
@@ -325,6 +372,16 @@ const Detect = (() => {
       if (isWall[i]) { walls.push([Math.floor(i / W), i % W]); cls[i] = 'wall'; }
       else if (cls[i] === 'frame') cls[i] = 'crate';
     }
+    // Moons on crate planks look like star outlines: a "star" cell among crate cells is crate.
+    for (let i = 0; i < W * H; i++) {
+      if (!starCell[i]) continue;
+      const r = Math.floor(i / W), c = i % W;
+      const crates = [[1,0],[-1,0],[0,1],[0,-1]].filter(([dr, dc]) => {
+        const nr = r + dr, nc = c + dc;
+        return nr >= 0 && nc >= 0 && nr < H && nc < W && cls[nr * W + nc] === 'crate';
+      }).length;
+      if (crates >= 2) { cls[i] = 'crate'; starCell[i] = false; }
+    }
     // A crate's number badge makes its cell look like something else; it belongs to the crate.
     for (let i = 0; i < W * H; i++) {
       if (!odd[i] || cls[i] === 'crate') continue;
@@ -343,6 +400,8 @@ const Detect = (() => {
     const joined = (a, b, pts, nx, ny) => {
       if (cls[a] !== cls[b] || NOT_PIECE.has(cls[a]) || cls[a] === 'wall' || lockCell[a] || lockCell[b]) return false;
       if (cls[a] === 'crate') return pts.filter(([x, y]) => ['crate', 'frame'].includes(classify(at(x, y, 1)))).length / pts.length > 0.5;
+      // Star outlines make the inside of a star piece busy; only a navy gap separates two of them.
+      if (starCell[a] && starCell[b]) return pts.filter(([x, y]) => { const [R, G, B] = at(x, y, 1); return R + G + B < 230 && B >= Math.max(R, G); }).length / pts.length < 0.5;
       const w = Math.max(2, Math.round(0.06 * cw)), side = 0.25 * cw;
       // Seam: clearly dark over half its length, or a little darker along (almost) all of it —
       // the 3D edge between two stacked pieces. Stud shadows only darken parts of an inner border.
@@ -391,7 +450,7 @@ const Detect = (() => {
       const cores = cells.map(i => layer[i]).filter(Boolean);
       const inner = !hidden && cores.length / cells.length >= 0.5 ? vote(cores) : null;
       if (!hidden && h * w === 1 && lockCell[r * W + c]) p.lock = 1;
-      else if (!hidden) {
+      else if (!hidden && cells.filter(i => starCell[i]).length / cells.length < 0.5) {
         // Icons sit on the piece's centre: a key is mostly gold with a small red/blue gem, a battery
         // (time bonus) is a purple can, a rocket is mostly red. Only the piece's own cells count.
         const own = new Set(cells);
@@ -417,6 +476,25 @@ const Detect = (() => {
       }
       // Layered piece: most of its cells showed the same second colour inside.
       if (inner && !p.key && !p.lock) p.inner = inner;
+      if (!hidden && cells.filter(i => starCell[i]).length / cells.length >= 0.5) p.star = true;
+      // Arrow piece: no studs (a flat face with one big arrow). Its edges spread along the arrow.
+      if (!hidden && !p.star) {
+        const lum = v => v[0] * 0.3 + v[1] * 0.59 + v[2] * 0.11;
+        let tex = 0, n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, t = 0;
+        for (const i of cells) {
+          const r0 = Math.floor(i / W), c0 = i % W;
+          for (let a = 0; a < 12; a++) for (let b = 0; b < 12; b++) {
+            const x = rect.x + (c0 + 0.08 + 0.84 * a / 11) * cw, y = rect.y + (r0 + 0.08 + 0.84 * b / 11) * ch;
+            const g = Math.abs(lum(at(x + 2, y, 0)) - lum(at(x - 2, y, 0))) + Math.abs(lum(at(x, y + 2, 0)) - lum(at(x, y - 2, 0)));
+            tex += g; t++;
+            if (g > 40) { n++; sx += x; sy += y; sxx += x * x; syy += y * y; }
+          }
+        }
+        if (tex / t < 15 && n > 20) {
+          const sdx = Math.sqrt(Math.max(1, sxx / n - (sx / n) ** 2)), sdy = Math.sqrt(Math.max(1, syy / n - (sy / n) ** 2));
+          p.axis = (sdx / sdy) / (w / h) >= 1 ? 'h' : 'v';
+        }
+      }
       pieces.push(p);
     };
 
@@ -479,26 +557,53 @@ const Detect = (() => {
     const edge = (side, n, pos) => {
       const kinds = [];
       for (let k = 0; k < n; k++) {
-        const pts = [-.4, -.3, .3, .4].map(t => classify(at(...pos(k + 0.5 + t), rad)));
-        // Digits on a frozen tile can cover the middle of a cell, so any frozen sample wins.
-        const l = pts.filter(x => x === 'frozen').length >= 2 ? 'frozen' : vote(pts);
-        kinds.push(['frame', 'empty', 'ice', 'crate'].includes(l) ? null : l);
+        const raw = [-.42, -.34, -.26, .26, .34, .42].flatMap(t => [0.3, 0.5].map(d => at(...pos(k + 0.5 + t, d), rad)));
+        const pts = raw.map(classify);
+        // Digits on a frozen tile can cover much of a cell, so a few frozen samples are enough;
+        // the white arrow on a normal exit and the digits themselves don't count. Exits are drawn
+        // in two tones, so the colour comes from the average of the coloured samples.
+        const lumOf = v => v[0] * 0.3 + v[1] * 0.59 + v[2] * 0.11;
+        const solid = raw.filter((_, i) => SOLID.has(pts[i])).sort((a, b) => lumOf(a) - lumOf(b));
+        const base = solid.slice(0, Math.max(1, Math.ceil(solid.length * 0.6)));
+        const l = pts.filter(x => x === 'frozen').length >= 3 ? 'frozen'
+          : solid.length ? nearestSolid([0, 1, 2].map(ch => base.reduce((a, v) => a + v[ch], 0) / base.length)) : vote(pts);
+        kinds.push(['frame', 'empty', 'ice', 'crate', 'white', 'track'].includes(l) ? null : l);
       }
+      // The arrow in the middle of an exit can tint one cell (blue → sky): smooth it out.
+      for (let k = 1; k + 1 < n; k++)
+        if (kinds[k] && kinds[k - 1] && kinds[k - 1] === kinds[k + 1] && kinds[k] !== kinds[k - 1] && (PARTNER[kinds[k - 1]] || []).includes(kinds[k]))
+          kinds[k] = kinds[k - 1];
+      // Neighbouring frozen tiles are separated by a strip of frame; one long tile isn't
+      // (its number may sit right on the cell border, so look for the frame, not for ice).
+      const gap = t => [0.15, 0.3, 0.5, 0.65].filter(d => ['frame', 'empty'].includes(classify(at(...pos(t, d), 1)))).length >= 2;
       for (let k = 0; k < n; k++) {
         const l = kinds[k];
         if (!l) continue;
         let e = k;
         // Frozen tiles sit side by side; one tile spanning several cells has no gap between them.
-        while (e + 1 < n && kinds[e + 1] === l && (l !== 'frozen' || classify(at(...pos(e + 1), 1)) === 'frozen')) e++;
-        gates.push({ id: gid++, side, start: k, len: e - k + 1, color: l === 'frozen' ? '?' : l, frozen: l === 'frozen' ? 1 : 0 });
+        while (e + 1 < n && kinds[e + 1] === l && (l !== 'frozen' || !gap(e + 1))) e++;
+        const gt = { id: gid++, side, start: k, len: e - k + 1, color: l === 'frozen' ? '?' : l, frozen: l === 'frozen' ? 1 : 0 };
+        // Star exit: pale star shapes on the exit away from its middle arrow.
+        if (l !== 'frozen') {
+          let pale = 0, tot = 0;
+          for (let t = 0.05; t < 0.95; t += 0.05) {
+            if (t > 0.3 && t < 0.7) continue;
+            for (const d of [0.2, 0.35, 0.5, 0.65]) {
+              const v = at(...pos(k + t * (e - k + 1), d), 1); tot++;
+              if (Math.min(...v) > 140 && Math.max(...v) - Math.min(...v) < 90) pale++;
+            }
+          }
+          if (pale / tot > 0.12) gt.star = true;
+        }
+        gates.push(gt);
         k = e;
       }
     };
-    const off = 0.4;
-    edge('L', H, t => [rect.x - off * cw, rect.y + t * ch]);
-    edge('R', H, t => [rect.x + rect.w + off * cw, rect.y + t * ch]);
-    edge('T', W, t => [rect.x + t * cw, rect.y - off * ch]);
-    edge('B', W, t => [rect.x + t * cw, rect.y + rect.h + off * ch]);
+    // pos(t, d): t along the edge in cells, d = depth into the frame as a fraction of a cell.
+    edge('L', H, (t, d = 0.4) => [rect.x - d * cw, rect.y + t * ch]);
+    edge('R', H, (t, d = 0.4) => [rect.x + rect.w + d * cw, rect.y + t * ch]);
+    edge('T', W, (t, d = 0.4) => [rect.x + t * cw, rect.y - d * ch]);
+    edge('B', W, (t, d = 0.4) => [rect.x + t * cw, rect.y + rect.h + d * ch]);
 
     const tracks = [];
     cls.forEach((l, i) => { if (l === 'track') tracks.push([Math.floor(i / W), i % W, trackColor[i]]); });

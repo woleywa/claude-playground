@@ -2,6 +2,8 @@
 // piece: { id, color, r, c, h, w, shape?, key, lock, ice, inner?, crate? }
 //   shape = [[dr, dc], …] cell offsets for non-rectangular pieces (absent = full h×w rectangle)
 //   color '?' = unknown (still under ice / inside a crate); inner = colour left behind when it leaves
+//   axis 'h' | 'v' = arrow piece, moves (and leaves) only along it; star = leaves only through star exits
+// gate.star = star exit: star pieces need one; normal pieces may use it too
 // gate:  { id, side: 'L'|'R'|'T'|'B', start, len, color, frozen }
 // level: { W, H, walls: [[r, c], …], tracks: [[r, c, color], …], pieces, gates, tickPerCell }
 //   a track cell only lets pieces of its colour move across it
@@ -22,6 +24,10 @@ const Engine = (() => {
     return rects.get(k);
   }
   const cellsOf = (p, r = p.r, c = p.c) => offsets(p).map(([dr, dc]) => [r + dr, c + dc]);
+  const ALL = [[1,0],[-1,0],[0,1],[0,-1]], H_ONLY = [[0,1],[0,-1]], V_ONLY = [[1,0],[-1,0]];
+  const dirsOf = p => p.axis === 'h' ? H_ONLY : p.axis === 'v' ? V_ONLY : ALL;
+  const gateOk = (p, gt) => !gt.frozen && gt.color === p.color && (!p.star || gt.star)
+    && !(p.axis === 'h' && (gt.side === 'T' || gt.side === 'B')) && !(p.axis === 'v' && (gt.side === 'L' || gt.side === 'R'));
 
   function grid(level, pieces) {
     const g = new Int32Array(level.W * level.H).fill(-1);
@@ -57,7 +63,7 @@ const Engine = (() => {
     while (q.length) {
       const [r, c] = q.shift();
       out.push([r, c]);
-      for (const [dr, dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      for (const [dr, dc] of dirsOf(p)) {
         const k = (r + dr) + ',' + (c + dc);
         if (seen.has(k) || !fits(level, g, p, r + dr, c + dc)) continue;
         seen.set(k, [r, c]);
@@ -77,7 +83,7 @@ const Engine = (() => {
       return (v === -1 || v === p.id) && (!t || t === p.color);
     };
     for (const gt of gates) {
-      if (gt.frozen > 0 || gt.color !== p.color) continue;
+      if (!gateOk(p, gt)) continue;
       const end = gt.start + gt.len;
       const across = gt.side === 'L' || gt.side === 'R' ? cells.map(q => q[0]) : cells.map(q => q[1]);
       if (Math.min(...across) < gt.start || Math.max(...across) >= end) continue;
@@ -125,7 +131,7 @@ const Engine = (() => {
   // Walls, iced/locked pieces and tracks of another colour can't be passed at all.
   function blockers(level, st, T) {
     const W = level.W, H = level.H, g = grid(level, st.pieces), tr = trackMap(level);
-    const gates = st.gates.filter(gt => !gt.frozen && gt.color === T.color);
+    const gates = st.gates.filter(gt => gateOk(T, gt));
     const none = { cost: Infinity, ids: new Set(), cells: new Set() };
     if (!gates.length) return none;
     const byId = new Map(st.pieces.map(p => [p.id, p]));
@@ -171,7 +177,7 @@ const Engine = (() => {
         const r = (i / W) | 0, c = i % W;
         const l = lane(r, c);
         if (d + l < best) { best = d + l; bestAt = i; }
-        for (const [dr, dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        for (const [dr, dc] of dirsOf(T)) {
           const nr = r + dr, nc = c + dc;
           if (nr < 0 || nc < 0 || nr >= H || nc >= W) continue;
           const k = at(nr, nc);
@@ -233,7 +239,7 @@ const Engine = (() => {
       if (!foot[T][a]) continue;
       const cells = cellsOf(P, (a / W) | 0, a % W);
       for (const gt of st.gates) {
-        if (gt.frozen || gt.color !== P.color) continue;
+        if (!gateOk(P, gt)) continue;
         const across = gt.side === 'L' || gt.side === 'R' ? cells.map(q => q[0]) : cells.map(q => q[1]);
         if (Math.min(...across) < gt.start || Math.max(...across) >= gt.start + gt.len) continue;
         const lane = [];
@@ -252,7 +258,7 @@ const Engine = (() => {
         if (ok) (lanes[a] = lanes[a] || []).push(lane);
       }
     }
-    const sig = rel.map((p, k) => k === T ? '#' : [p.color, p.inner || '', p.key ? 1 : 0, p.lock, p.shape ? JSON.stringify(p.shape) : p.h + 'x' + p.w].join('|'));
+    const sig = rel.map((p, k) => k === T ? '#' : [p.color, p.inner || '', p.key ? 1 : 0, p.lock, p.axis || '', p.star ? 1 : 0, p.shape ? JSON.stringify(p.shape) : p.h + 'x' + p.w].join('|'));
     const groups = [...new Set(sig)].map(g => sig.map((s2, k) => s2 === g ? k : -1).filter(k => k >= 0));
     // Positions are stored flat (K numbers per state) and remembered by a 64-bit hash of the
     // canonical (per-group sorted) positions, which keeps a million+ states within phone memory.
@@ -276,12 +282,14 @@ const Engine = (() => {
     };
     const occ = new Int16Array(N);
     const fill = pos => { occ.set(base); for (let k = 0; k < K; k++) for (const i of foot[k][pos[k]]) occ[i] = k; };
+    const axes = rel.map(p => p.axis || '');
     const reach = (k, pos) => {
       const seen = new Set([pos[k]]), q = [pos[k]];
       const ok = a => { const f = foot[k][a]; if (!f) return false; for (const i of f) if (occ[i] !== -1 && occ[i] !== k) return false; return true; };
+      const ax = axes[k];
       for (let h = 0; h < q.length; h++) {
         const a = q[h], c = a % W;
-        for (const b of [a - W, a + W, c > 0 ? a - 1 : -1, c < W - 1 ? a + 1 : -1]) {
+        for (const b of [ax === 'h' ? -1 : a - W, ax === 'h' ? -1 : a + W, ax !== 'v' && c > 0 ? a - 1 : -1, ax !== 'v' && c < W - 1 ? a + 1 : -1]) {
           if (b < 0 || b >= N || seen.has(b) || !ok(b)) continue;
           seen.add(b); q.push(b);
         }
@@ -303,8 +311,8 @@ const Engine = (() => {
         for (const a of bk[d] || []) {
           if (dist[a] !== d) continue;
           for (const l of lanes[a] || []) { let c = 0, bad = false; for (const i of l) if (occ[i] !== -1 && occ[i] !== T) { if (occ[i] < 0) bad = true; c++; } if (!bad) best = Math.min(best, d + c); }
-          const c = a % W;
-          for (const b of [a - W, a + W, c > 0 ? a - 1 : -1, c < W - 1 ? a + 1 : -1]) {
+          const c = a % W, ax = axes[T];
+          for (const b of [ax === 'h' ? -1 : a - W, ax === 'h' ? -1 : a + W, ax !== 'v' && c > 0 ? a - 1 : -1, ax !== 'v' && c < W - 1 ? a + 1 : -1]) {
             if (b < 0 || b >= N || !foot[T][b]) continue;
             const k = cost(b);
             if (k < 0 || d + k >= dist[b]) continue;
@@ -477,7 +485,7 @@ const Engine = (() => {
     while (q.length) {
       const [y, x] = q.shift();
       if (y === r && x === c) break;
-      for (const [dy, dx] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      for (const [dy, dx] of dirsOf(p)) {
         const k = (y + dy) + ',' + (x + dx);
         if (prev.has(k) || !fits(level, g, p, y + dy, x + dx)) continue;
         prev.set(k, [y, x]);

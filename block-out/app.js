@@ -199,6 +199,8 @@ function pieceEl(p, r0, c0, cs, g, ghost) {
   if (p.lock) bits.push('🔒' + p.lock);
   if (p.key) bits.push('🗝️');
   if (p.item) bits.push(p.item === 'battery' ? '🔋' : '🚀');
+  if (p.axis) bits.push(p.axis === 'h' ? '⇔' : '⇕');
+  if (p.star) bits.push('★');
   if (p.color === '?' && !p.ice) bits.push('?');
   if (bits.length) {
     const mr = offs.reduce((s, q) => s + q[0], 0) / offs.length, mc = offs.reduce((s, q) => s + q[1], 0) / offs.length;
@@ -238,7 +240,7 @@ function render() {
   for (const gt of view.gates) {
     const d = el('div', 'gate', { ...gateBox(gt, cs, g), background: COLORS[gt.color] });
     if (gt.frozen) { d.classList.add('frozen'); d.textContent = (gt.side === 'L' || gt.side === 'R' ? '❄\n' : '❄') + gt.frozen; }
-    else d.textContent = gt.color === '?' ? '?' : ARROW[gt.side];
+    else d.textContent = (gt.star ? (gt.side === 'L' || gt.side === 'R' ? '★\n' : '★ ') : '') + (gt.color === '?' ? '?' : ARROW[gt.side]);
     if (!sol && sel && sel.kind === 'gate' && sel.id === gt.id) d.classList.add('sel');
     if (step && step.kind === 'exit' && step.gateId === gt.id) d.classList.add('target');
     b.appendChild(d);
@@ -435,7 +437,14 @@ function inspector() {
       l.append(cb, ' ' + text);
       return l;
     };
-    row.append(check('🗝️ Key', obj.key, v => obj.key = v), check('📦 Crate', obj.crate, v => { obj.crate = v; if (v) { obj.color = '?'; obj.ice = obj.ice || 1; } }),
+    const axis = el('label'); axis.append('Moves ');
+    const sel = el('select');
+    [['', 'any way'], ['h', '⇔ left/right'], ['v', '⇕ up/down']].forEach(([v, t]) => { const o = el('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
+    sel.value = obj.axis || '';
+    sel.addEventListener('change', () => { if (sel.value) obj.axis = sel.value; else delete obj.axis; save(); render(); });
+    axis.appendChild(sel);
+    row.append(axis, check('★ Star piece', obj.star, v => { if (v) obj.star = true; else delete obj.star; }),
+      check('🗝️ Key', obj.key, v => obj.key = v), check('📦 Crate', obj.crate, v => { obj.crate = v; if (v) { obj.color = '?'; obj.ice = obj.ice || 1; } }),
       numberField('🔒 Lock', obj.lock, v => obj.lock = v), numberField(obj.crate ? '📦 Count' : '❄ Ice', obj.ice, v => obj.ice = v));
     if (Engine.cellsOf(obj).length > 1) {
       const split = el('button', 'btn'); split.textContent = 'Split into cells';
@@ -451,7 +460,11 @@ function inspector() {
     const span = obj.len > 1 ? `${obj.start + 1}–${obj.start + obj.len}` : obj.start + 1;
     box.appendChild(el('h3')).textContent = `${NAMES[obj.color]} exit · ${SIDE[obj.side]} side, ${obj.side === 'L' || obj.side === 'R' ? 'row' : 'col'} ${span}`;
     box.appendChild(colorRow(obj.color, k => obj.color = k));
-    row.append(numberField('❄ Frozen', obj.frozen, v => obj.frozen = v));
+    const star = el('label', 'check');
+    const sb = el('input'); sb.type = 'checkbox'; sb.checked = !!obj.star;
+    sb.addEventListener('change', () => { if (sb.checked) obj.star = true; else delete obj.star; changed(); });
+    star.append(sb, ' ★ Star exit');
+    row.append(numberField('❄ Frozen', obj.frozen, v => obj.frozen = v), star);
   }
   const del = el('button', 'btn'); del.textContent = 'Delete';
   del.addEventListener('click', () => {
@@ -520,7 +533,7 @@ function status(msg, cls) { const s = $('status'); s.textContent = msg; s.classN
 
 // ── Solving ────────────────────────────────────────────────
 function pieceName(p) {
-  const col = p.crate ? 'Crate' : NAMES[p.color] + (p.inner ? '/' + NAMES[p.inner].toLowerCase() : '');
+  const col = (p.crate ? 'Crate' : NAMES[p.color] + (p.inner ? '/' + NAMES[p.inner].toLowerCase() : '')) + (p.star ? ' ★' : '');
   return `${col} ${p.shape ? p.shape.length + '-block' : p.h + '×' + p.w}`;
 }
 
@@ -584,7 +597,7 @@ $('solve').addEventListener('click', () => {
   const t0 = performance.now();
   status('Solving…');
   try {
-    worker = new Worker('worker.js?v=11');
+    worker = new Worker('worker.js?v=12');
   } catch {
     setTimeout(() => showResult(Engine.solve(level, 20000), performance.now() - t0), 20);
     return;
