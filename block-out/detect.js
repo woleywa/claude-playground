@@ -466,8 +466,10 @@ const Detect = (() => {
       // An icon (battery) sitting on the border hides the seam: only judge points with the piece's
       // colour on both sides of the line.
       const own = k => k === cls[a] || (PARTNER[cls[a]] || []).includes(k);
+      // An icon covering half the border or more can only sit on one piece.
+      const n0 = pts.length;
       if (SOLID.has(cls[a])) pts = pts.filter(([x, y]) => own(classify(at(x - nx * 0.2 * cw, y - ny * 0.2 * ch, 1))) && own(classify(at(x + nx * 0.2 * cw, y + ny * 0.2 * ch, 1))));
-      if (pts.length < 3) return true;
+      if (pts.length < 3 || pts.length <= n0 / 2) return true;
       const w = Math.max(2, Math.round(0.06 * cw)), side = 0.25 * cw;
       // Studs repeat twice per cell, so inside a piece a cell border looks just like the line
       // through the middle of a cell. A seam between two pieces is darker than those mid-lines.

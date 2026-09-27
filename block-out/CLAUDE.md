@@ -108,7 +108,8 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
   colour. Wall flood stops at cells with ≥5 rim-coloured samples (crate rims), so a crate that touches
   walls stays a crate. Plank cells with more crate than frame samples are crate, not frame.
 - Seams: for piece colours, only border points with the piece colour 0.2 cell to both sides count
-  (a battery on the border hid the seam's absence); with <3 such points the cells join.
+  (a battery on the border hid the seam's absence); with <3 such points, or half the border or more
+  hidden by an icon, the cells join (an icon sits on one piece; the leftover end points are dark bevels).
 - locate(): a finer multiple lattice also wins when the coarse one is impure (<0.8) and the finer is
   ≥0.07 purer with ≥60% of the seam score (a big seamless crate favoured 4×5 over 8×10).
 
