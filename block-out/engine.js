@@ -1,28 +1,42 @@
 // Rules + solver. Pure functions, no DOM.
-// piece: { id, color, r, c, h, w, key, lock, ice }   color '?' = unknown (e.g. still under ice)
+// piece: { id, color, r, c, h, w, shape?, key, lock, ice, inner?, crate? }
+//   shape = [[dr, dc], …] cell offsets for non-rectangular pieces (absent = full h×w rectangle)
+//   color '?' = unknown (still under ice / inside a crate); inner = colour left behind when it leaves
 // gate:  { id, side: 'L'|'R'|'T'|'B', start, len, color, frozen }
-// level: { W, H, pieces, gates, tickPerCell }
+// level: { W, H, walls: [[r, c], …], pieces, gates, tickPerCell }
 // Ice counts down once per piece that leaves (or per cell with tickPerCell);
 // frozen exits count down once per move (every drag, including one that leaves).
 const Engine = (() => {
   const clone = s => JSON.parse(JSON.stringify(s));
   const movable = p => !p.ice && !p.lock && p.color !== '?';
 
+  const rects = new Map();
+  function offsets(p) {
+    if (p.shape) return p.shape;
+    const k = p.h + 'x' + p.w;
+    if (!rects.has(k)) {
+      const o = [];
+      for (let r = 0; r < p.h; r++) for (let c = 0; c < p.w; c++) o.push([r, c]);
+      rects.set(k, o);
+    }
+    return rects.get(k);
+  }
+  const cellsOf = (p, r = p.r, c = p.c) => offsets(p).map(([dr, dc]) => [r + dr, c + dc]);
+
   function grid(level, pieces) {
     const g = new Int32Array(level.W * level.H).fill(-1);
+    for (const [r, c] of level.walls || []) g[r * level.W + c] = -2;
     for (const p of pieces)
-      for (let r = p.r; r < p.r + p.h; r++)
-        for (let c = p.c; c < p.c + p.w; c++) g[r * level.W + c] = p.id;
+      for (const [r, c] of cellsOf(p)) g[r * level.W + c] = p.id;
     return g;
   }
 
   function fits(level, g, p, r, c) {
-    if (r < 0 || c < 0 || r + p.h > level.H || c + p.w > level.W) return false;
-    for (let y = r; y < r + p.h; y++)
-      for (let x = c; x < c + p.w; x++) {
-        const v = g[y * level.W + x];
-        if (v !== -1 && v !== p.id) return false;
-      }
+    for (const [y, x] of cellsOf(p, r, c)) {
+      if (y < 0 || x < 0 || y >= level.H || x >= level.W) return false;
+      const v = g[y * level.W + x];
+      if (v !== -1 && v !== p.id) return false;
+    }
     return true;
   }
 
@@ -44,14 +58,24 @@ const Engine = (() => {
     return out;
   }
 
-  function gateFor(level, gates, p, r, c) {
+  // The piece can leave through the gate from (r, c): it spans only the gate's rows/columns and
+  // nothing sits between any of its cells and that edge.
+  function gateFor(level, g, gates, p, r, c) {
+    const cells = cellsOf(p, r, c);
+    const free = (y, x) => { const v = g[y * level.W + x]; return v === -1 || v === p.id; };
     for (const gt of gates) {
       if (gt.frozen > 0 || gt.color !== p.color) continue;
       const end = gt.start + gt.len;
-      if (gt.side === 'L' && c === 0 && r >= gt.start && r + p.h <= end) return gt;
-      if (gt.side === 'R' && c + p.w === level.W && r >= gt.start && r + p.h <= end) return gt;
-      if (gt.side === 'T' && r === 0 && c >= gt.start && c + p.w <= end) return gt;
-      if (gt.side === 'B' && r + p.h === level.H && c >= gt.start && c + p.w <= end) return gt;
+      const across = gt.side === 'L' || gt.side === 'R' ? cells.map(q => q[0]) : cells.map(q => q[1]);
+      if (Math.min(...across) < gt.start || Math.max(...across) >= end) continue;
+      const clear = cells.every(([y, x]) => {
+        if (gt.side === 'L') { for (let k = 0; k < x; k++) if (!free(y, k)) return false; }
+        if (gt.side === 'R') { for (let k = x + 1; k < level.W; k++) if (!free(y, k)) return false; }
+        if (gt.side === 'T') { for (let k = 0; k < y; k++) if (!free(k, x)) return false; }
+        if (gt.side === 'B') { for (let k = y + 1; k < level.H; k++) if (!free(k, x)) return false; }
+        return true;
+      });
+      if (clear) return gt;
     }
     return null;
   }
@@ -61,17 +85,19 @@ const Engine = (() => {
     for (const p of st.pieces) {
       if (!movable(p)) continue;
       for (const [r, c] of reachable(level, g, p)) {
-        const gt = gateFor(level, st.gates, p, r, c);
+        const gt = gateFor(level, g, st.gates, p, r, c);
         if (gt) return { pieceId: p.id, r, c, gateId: gt.id };
       }
     }
     return null;
   }
 
-  function applyExit(level, st, pieceId) {
+  // A layered piece loses its outer colour and the inner piece stays where it is.
+  function applyExit(level, st, pieceId, r, c) {
     const p = st.pieces.find(x => x.id === pieceId);
-    st.pieces = st.pieces.filter(x => x.id !== pieceId);
-    const tick = level.tickPerCell ? p.h * p.w : 1;
+    if (p.inner) st.pieces = st.pieces.map(x => x.id === pieceId ? { ...x, r, c, color: x.inner, inner: undefined, key: false } : x);
+    else st.pieces = st.pieces.filter(x => x.id !== pieceId);
+    const tick = level.tickPerCell ? offsets(p).length : 1;
     for (const q of st.pieces) {
       if (q.ice) q.ice = Math.max(0, q.ice - tick);
       if (p.key && q.lock && q.color === p.color) q.lock--;
@@ -129,7 +155,7 @@ const Engine = (() => {
       if (ex) {
         const p = st.pieces.find(x => x.id === ex.pieceId);
         steps.push({ kind: 'exit', before: clone(st), pieceId: p.id, fromR: p.r, fromC: p.c, r: ex.r, c: ex.c, gateId: ex.gateId });
-        applyExit(level, st, p.id);
+        applyExit(level, st, p.id, ex.r, ex.c);
         continue;
       }
       const un = findUnblock(level, st, deadline);
@@ -179,7 +205,7 @@ const Engine = (() => {
     return out;
   }
 
-  return { solve, movable, path };
+  return { solve, movable, path, cellsOf };
 })();
 
 if (typeof module !== 'undefined') module.exports = Engine;

@@ -20,6 +20,7 @@
     <select id="preset">
       <option value="">Load…</option>
       <option value="l198">Level 198</option>
+      <option value="l204">Level 204</option>
       <option value="demo">Small demo</option>
       <option value="blank">Blank board</option>
     </select>
@@ -27,7 +28,7 @@
   </div>
 
   <section id="import" class="panel" hidden>
-    <p class="hint-line">Drag a box over the <b>grid of blocks</b>: inside the frame, not including it.</p>
+    <p class="hint-line" id="imp-msg"></p>
     <div class="size-row">
       <label>Columns <input type="number" id="imp-w" min="3" max="12" value="7"></label>
       <label>Rows <input type="number" id="imp-h" min="3" max="14" value="10"></label>
@@ -44,6 +45,8 @@
       <button data-tool="select" class="on">Select</button>
       <button data-tool="draw">Draw piece</button>
       <button data-tool="gate">Draw exit</button>
+      <button data-tool="wall">Wall</button>
+      <button data-tool="join">Join</button>
       <button data-tool="erase">Erase</button>
     </div>
     <div class="chips" id="chips"></div>
@@ -67,6 +70,7 @@
   </section>
 
   <p id="status"></p>
+  <button class="btn" id="adjust" hidden>Wrong board? Adjust</button>
 
   <section id="solution" class="panel" hidden>
     <ol id="steps"></ol>
@@ -75,8 +79,8 @@
 
   <details class="panel help">
     <summary>How it works</summary>
-    <p><b>Screenshot:</b> pick the image (or copy it and tap 📋 Paste / press Ctrl+V), drag a box over the blocks, Detect. Colours, piece shapes, keys, locks, ice and exits are read automatically. <b>Numbers aren't</b>: tap each ice block, lock and frozen exit (Select tool) and type its number.</p>
-    <p><b>Rules:</b> drag a piece anywhere through empty space; it leaves through an exit of its own colour that is at least as wide as the piece. Each piece that leaves counts down every ice block by one; every move counts down the frozen exits. A piece with a key opens the lock of its own colour when it leaves.</p>
+    <p><b>Screenshot:</b> pick the image, or copy it and tap 📋 Paste (Ctrl/Cmd+V on a computer). The board is found automatically: colours, piece shapes, walls, keys, locks, layered pieces, ice, crates and exits. <b>Numbers aren't read</b>: tap each ice block, crate, lock and frozen exit (Select tool) and type its number. If the board comes out wrong, tap <i>Wrong board? Adjust</i> and drag a box over the grid.</p>
+    <p><b>Rules:</b> drag a piece anywhere through empty space; it leaves through an exit of its own colour that is at least as wide as the piece. Each piece that leaves counts down every ice block by one; every move counts down the frozen exits. A piece with a key opens the lock of its own colour when it leaves. A layered piece leaves its core behind when the outer colour exits. Crates open like ice; what's inside only shows once they do.</p>
     <p><b>Unknown colours (?)</b>: pieces still under ice and frozen exits. The solver plays as far as it can; do those moves, then import a new screenshot once the colours show.</p>
   </details>
 

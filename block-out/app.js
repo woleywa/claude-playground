@@ -14,7 +14,7 @@ const ARROW = { L: '◀', R: '▶', T: '▲', B: '▼' };
 
 const PRESETS = {
   l198: {
-    W: 7, H: 10, tickPerCell: false,
+    W: 7, H: 10, tickPerCell: false, note: 'Level 198 loaded (read from a screenshot).',
     pieces: [
       {id: 1, color: "pink", r: 0, c: 0, h: 2, w: 1, key: false, lock: 0, ice: 0},
       {id: 2, color: "yellow", r: 0, c: 1, h: 2, w: 1, key: false, lock: 0, ice: 0},
@@ -60,6 +60,33 @@ const PRESETS = {
       {id: 9, side: "B", start: 3, len: 1, color: "?", frozen: 14},
       {id: 10, side: "B", start: 4, len: 1, color: "?", frozen: 14},
       {id: 11, side: "B", start: 5, len: 1, color: "?", frozen: 16},
+    ],
+  },
+  l204: {
+    W: 7, H: 10, tickPerCell: false, note: 'Level 204 loaded (read from a screenshot).',
+    walls: [[0,0],[0,1],[0,2],[0,3],[1,0],[1,1],[1,2],[2,0],[2,1],[3,0]],
+    pieces: [
+      {id: 1, color: "yellow", r: 0, c: 4, h: 3, w: 1, key: false, lock: 0, ice: 0, inner: "purple"},
+      {id: 2, color: "green", r: 0, c: 5, h: 1, w: 2, key: false, lock: 0, ice: 0},
+      {id: 3, color: "blue", r: 1, c: 5, h: 1, w: 2, key: false, lock: 0, ice: 0},
+      {id: 4, color: "blue", r: 2, c: 2, h: 1, w: 2, key: false, lock: 0, ice: 0},
+      {id: 5, color: "purple", r: 2, c: 5, h: 1, w: 2, key: false, lock: 0, ice: 0},
+      {id: 6, color: "blue", r: 3, c: 6, h: 3, w: 1, key: false, lock: 0, ice: 0},
+      {id: 7, color: "yellow", r: 4, c: 0, h: 1, w: 1, key: false, lock: 0, ice: 0},
+      {id: 8, color: "yellow", r: 4, c: 1, h: 2, w: 1, key: false, lock: 0, ice: 0},
+      {id: 9, color: "yellow", r: 4, c: 2, h: 2, w: 1, key: false, lock: 0, ice: 0},
+      {id: 10, color: "purple", r: 4, c: 3, h: 2, w: 2, key: false, lock: 0, ice: 0, shape: [[0,0],[1,0],[1,1]]},
+      {id: 11, color: "red", r: 4, c: 4, h: 2, w: 2, key: false, lock: 0, ice: 0, shape: [[0,0],[0,1],[1,1]]},
+      {id: 12, color: "blue", r: 5, c: 0, h: 1, w: 1, key: false, lock: 0, ice: 0},
+      {id: 13, color: "?", r: 6, c: 0, h: 4, w: 4, key: false, lock: 0, ice: 9, crate: true},
+      {id: 14, color: "?", r: 6, c: 4, h: 4, w: 3, key: false, lock: 0, ice: 15, crate: true},
+    ],
+    gates: [
+      {id: 1, side: "L", start: 4, len: 2, color: "red", frozen: 0},
+      {id: 2, side: "L", start: 7, len: 3, color: "?", frozen: 12},
+      {id: 3, side: "R", start: 3, len: 3, color: "?", frozen: 5},
+      {id: 4, side: "T", start: 4, len: 2, color: "blue", frozen: 0},
+      {id: 5, side: "B", start: 4, len: 3, color: "?", frozen: 18},
     ],
   },
   demo: {
@@ -118,6 +145,43 @@ const rectCss = (r, c, h, w, cs, g, pad = 2) => ({
   width: (w * cs - 2 * pad) + 'px', height: (h * cs - 2 * pad) + 'px',
 });
 
+// A piece is a container of cell tiles, so any shape renders and animates as one unit.
+function pieceEl(p, r0, c0, cs, g, ghost) {
+  const wrap = el('div', ghost ? 'pwrap ghost' : 'pwrap', { left: (g + c0 * cs) + 'px', top: (g + r0 * cs) + 'px', width: p.w * cs + 'px', height: p.h * cs + 'px' });
+  const offs = Engine.cellsOf(p, 0, 0);
+  const has = new Set(offs.map(([r, c]) => r + ',' + c));
+  for (const [r, c] of offs) {
+    const open = (dr, dc) => !has.has((r + dr) + ',' + (c + dc));
+    const T = open(-1, 0) ? 2 : 0, B = open(1, 0) ? 2 : 0, L = open(0, -1) ? 2 : 0, R = open(0, 1) ? 2 : 0;
+    const d = el('div', 'piece', {
+      left: (c * cs + L) + 'px', top: (r * cs + T) + 'px', width: (cs - L - R) + 'px', height: (cs - T - B) + 'px',
+      borderRadius: [T && L, T && R, B && R, B && L].map(v => v ? '7px' : '0').join(' '),
+    });
+    if (!ghost) {
+      if (offs.length > 1) d.style.boxShadow = 'none';
+      if (p.crate) d.classList.add('crate');
+      else if (p.ice) d.classList.add('ice');
+      else d.style.background = COLORS[p.color];
+      if (p.inner) { d.style.background = COLORS[p.inner]; d.style.boxShadow = `inset 0 0 0 ${Math.round(cs * 0.27)}px ${COLORS[p.color]}`; }
+    }
+    wrap.appendChild(d);
+  }
+  if (ghost) return wrap;
+  const bits = [];
+  if (p.ice) bits.push((p.crate ? '📦' : '❄') + p.ice);
+  if (p.lock) bits.push('🔒' + p.lock);
+  if (p.key) bits.push('🗝️');
+  if (p.color === '?' && !p.ice) bits.push('?');
+  if (bits.length) {
+    const mr = offs.reduce((s, q) => s + q[0], 0) / offs.length, mc = offs.reduce((s, q) => s + q[1], 0) / offs.length;
+    const [lr, lc] = p.shape ? offs.reduce((b, q) => Math.hypot(q[0] - mr, q[1] - mc) < Math.hypot(b[0] - mr, b[1] - mc) ? q : b) : [mr, mc];
+    const lab = el('div', 'plabel' + (p.ice && !p.crate ? ' dark' : ''), { left: (lc * cs) + 'px', top: (lr * cs) + 'px', width: cs + 'px', height: cs + 'px' });
+    bits.forEach(t => lab.appendChild(el('span')).textContent = t);
+    wrap.appendChild(lab);
+  }
+  return wrap;
+}
+
 function currentView() {
   if (!sol) return { view: level, step: null };
   const step = sol.steps[stepIdx] || null;
@@ -132,12 +196,14 @@ function render() {
   b.style.height = (level.H * cs + 2 * g) + 'px';
   const { view, step } = currentView();
 
+  const walls = new Set((level.walls || []).map(([r, c]) => r + ',' + c));
   for (let r = 0; r < level.H; r++)
-    for (let c = 0; c < level.W; c++) b.appendChild(el('div', 'grid-bg', rectCss(r, c, 1, 1, cs, g, 1)));
+    for (let c = 0; c < level.W; c++)
+      if (!walls.has(r + ',' + c)) b.appendChild(el('div', 'grid-bg', rectCss(r, c, 1, 1, cs, g, 1)));
 
   for (const gt of view.gates) {
     const d = el('div', 'gate', { ...gateBox(gt, cs, g), background: COLORS[gt.color] });
-    if (gt.frozen) { d.classList.add('frozen'); d.textContent = '❄' + gt.frozen; }
+    if (gt.frozen) { d.classList.add('frozen'); d.textContent = (gt.side === 'L' || gt.side === 'R' ? '❄\n' : '❄') + gt.frozen; }
     else d.textContent = gt.color === '?' ? '?' : ARROW[gt.side];
     if (!sol && sel && sel.kind === 'gate' && sel.id === gt.id) d.classList.add('sel');
     if (step && step.kind === 'exit' && step.gateId === gt.id) d.classList.add('target');
@@ -145,13 +211,7 @@ function render() {
   }
 
   for (const p of view.pieces) {
-    const d = el('div', 'piece', { ...rectCss(p.r, p.c, p.h, p.w, cs, g), background: COLORS[p.color] });
-    const bits = [];
-    if (p.ice) { d.classList.add('ice'); bits.push('❄' + p.ice); }
-    if (p.lock) bits.push('🔒' + p.lock);
-    if (p.key) bits.push('🗝️');
-    if (p.color === '?' && !p.ice) bits.push('?');
-    bits.forEach(t => d.appendChild(el('span')).textContent = t);
+    const d = pieceEl(p, p.r, p.c, cs, g);
     if (!sol && sel && sel.kind === 'piece' && sel.id === p.id) d.classList.add('sel');
     if (step && step.pieceId === p.id) d.classList.add('moving');
     b.appendChild(d);
@@ -159,7 +219,7 @@ function render() {
 
   if (step) {
     const p = step.before.pieces.find(x => x.id === step.pieceId);
-    if (step.r !== p.r || step.c !== p.c) b.appendChild(el('div', 'ghost', rectCss(step.r, step.c, p.h, p.w, cs, g)));
+    if (step.r !== p.r || step.c !== p.c) b.appendChild(pieceEl(p, step.r, step.c, cs, g, true));
   }
 
   if (drag && drag.kind === 'draw') {
@@ -184,7 +244,18 @@ function locate(e) {
     edge: inR && x < g ? ['L', r] : inR && x > g + level.W * cs ? ['R', r]
         : inC && y < g ? ['T', c] : inC && y > g + level.H * cs ? ['B', c] : null };
 }
-const pieceAt = (r, c) => level.pieces.find(p => r >= p.r && r < p.r + p.h && c >= p.c && c < p.c + p.w);
+const pieceAt = (r, c) => level.pieces.find(p => Engine.cellsOf(p).some(([y, x]) => y === r && x === c));
+const isWall = (r, c) => (level.walls || []).some(([y, x]) => y === r && x === c);
+
+// Rebuild r/c/h/w/shape from a list of absolute cells.
+function reshape(p, cells) {
+  const r = Math.min(...cells.map(q => q[0])), c = Math.min(...cells.map(q => q[1]));
+  const h = Math.max(...cells.map(q => q[0])) - r + 1, w = Math.max(...cells.map(q => q[1])) - c + 1;
+  Object.assign(p, { r, c, h, w });
+  if (cells.length === h * w) delete p.shape;
+  else p.shape = cells.map(([y, x]) => [y - r, x - c]);
+  return p;
+}
 const gateAt = (side, k) => level.gates.find(gt => gt.side === side && k >= gt.start && k < gt.start + gt.len);
 const nextId = list => list.reduce((m, x) => Math.max(m, x.id), 0) + 1;
 
@@ -193,6 +264,26 @@ function changed() { save(); render(); inspector(); }
 $('board').addEventListener('pointerdown', e => {
   if (sol) { stopPlay(); stepForward(); return; }
   const h = locate(e);
+  if (tool === 'wall' && h.inside) {
+    if (!pieceAt(h.r, h.c)) {
+      const on = !isWall(h.r, h.c);
+      drag = { kind: 'wall', on };
+      paintWall(h.r, h.c, on);
+      $('board').setPointerCapture(e.pointerId);
+    }
+    return;
+  }
+  if (tool === 'join' && h.inside) {
+    const p = pieceAt(h.r, h.c);
+    const first = sel && sel.kind === 'piece' && level.pieces.find(x => x.id === sel.id);
+    if (p && first && p !== first) {
+      reshape(first, [...Engine.cellsOf(first), ...Engine.cellsOf(p)]);
+      level.pieces = level.pieces.filter(x => x !== p);
+      status('Joined. Tap another piece to add it too.', '');
+    } else sel = p ? { kind: 'piece', id: p.id } : null;
+    changed();
+    return;
+  }
   if (tool === 'select' || tool === 'erase') {
     const p = h.inside ? pieceAt(h.r, h.c) : null;
     const gt = h.edge ? gateAt(...h.edge) : null;
@@ -209,9 +300,16 @@ $('board').addEventListener('pointerdown', e => {
   if (drag) { $('board').setPointerCapture(e.pointerId); render(); }
 });
 
+function paintWall(r, c, on) {
+  if (pieceAt(r, c) || isWall(r, c) === on) return;
+  level.walls = on ? [...(level.walls || []), [r, c]] : level.walls.filter(([y, x]) => y !== r || x !== c);
+  save(); render();
+}
+
 $('board').addEventListener('pointermove', e => {
   if (!drag) return;
   const h = locate(e);
+  if (drag.kind === 'wall') { if (h.inside) paintWall(h.r, h.c, drag.on); return; }
   if (drag.kind === 'draw') { drag.r1 = h.rC; drag.c1 = h.cC; }
   else drag.k1 = drag.side === 'L' || drag.side === 'R' ? h.rC : h.cC;
   render();
@@ -219,10 +317,13 @@ $('board').addEventListener('pointermove', e => {
 
 $('board').addEventListener('pointerup', () => {
   if (!drag) return;
+  if (drag.kind === 'wall') { drag = null; return; }
   if (drag.kind === 'draw') {
     const r = Math.min(drag.r0, drag.r1), c = Math.min(drag.c0, drag.c1);
     const h = Math.abs(drag.r1 - drag.r0) + 1, w = Math.abs(drag.c1 - drag.c0) + 1;
-    level.pieces = level.pieces.filter(p => p.r >= r + h || p.r + p.h <= r || p.c >= c + w || p.c + p.w <= c);
+    const inRect = ([y, x]) => y >= r && y < r + h && x >= c && x < c + w;
+    level.pieces = level.pieces.filter(p => !Engine.cellsOf(p).some(inRect));
+    if (level.walls) level.walls = level.walls.filter(q => !inRect(q));
     const p = { id: nextId(level.pieces), color, r, c, h, w, key: false, lock: 0, ice: 0 };
     level.pieces.push(p);
     sel = { kind: 'piece', id: p.id };
@@ -267,13 +368,32 @@ function inspector() {
   if (!obj) return;
   const row = el('div', 'row');
   if (sel.kind === 'piece') {
-    box.appendChild(el('h3')).textContent = `${NAMES[obj.color]} piece ${obj.h}×${obj.w} · row ${obj.r + 1}, col ${obj.c + 1}`;
+    box.appendChild(el('h3')).textContent = `${pieceName(obj)} · row ${obj.r + 1}, col ${obj.c + 1}`;
     box.appendChild(colorRow(obj.color, k => obj.color = k));
-    const key = el('label', 'check');
-    const cb = el('input'); cb.type = 'checkbox'; cb.checked = obj.key;
-    cb.addEventListener('change', () => { obj.key = cb.checked; save(); render(); });
-    key.append(cb, ' 🗝️ Key');
-    row.append(key, numberField('🔒 Lock', obj.lock, v => obj.lock = v), numberField('❄ Ice', obj.ice, v => obj.ice = v));
+    const inner = el('label'); inner.append('Core colour (layered piece):');
+    box.appendChild(inner);
+    const ir = colorRow(obj.inner || '', k => { if (k === '?' || k === obj.inner) delete obj.inner; else obj.inner = k; });
+    ir.lastChild.textContent = '✕'; ir.lastChild.title = 'No core';
+    box.appendChild(ir);
+    const check = (text, on, set) => {
+      const l = el('label', 'check');
+      const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!on;
+      cb.addEventListener('change', () => { set(cb.checked); changed(); });
+      l.append(cb, ' ' + text);
+      return l;
+    };
+    row.append(check('🗝️ Key', obj.key, v => obj.key = v), check('📦 Crate', obj.crate, v => { obj.crate = v; if (v) { obj.color = '?'; obj.ice = obj.ice || 1; } }),
+      numberField('🔒 Lock', obj.lock, v => obj.lock = v), numberField(obj.crate ? '📦 Count' : '❄ Ice', obj.ice, v => obj.ice = v));
+    if (Engine.cellsOf(obj).length > 1) {
+      const split = el('button', 'btn'); split.textContent = 'Split into cells';
+      split.addEventListener('click', () => {
+        const cells = Engine.cellsOf(obj);
+        level.pieces = level.pieces.filter(x => x !== obj);
+        cells.forEach(([r, c]) => level.pieces.push({ ...obj, id: nextId(level.pieces), r, c, h: 1, w: 1, shape: undefined }));
+        sel = null; changed();
+      });
+      row.appendChild(split);
+    }
   } else {
     const span = obj.len > 1 ? `${obj.start + 1}–${obj.start + obj.len}` : obj.start + 1;
     box.appendChild(el('h3')).textContent = `${NAMES[obj.color]} exit · ${SIDE[obj.side]} side, ${obj.side === 'L' || obj.side === 'R' ? 'row' : 'col'} ${span}`;
@@ -317,6 +437,7 @@ function resize() {
   const H = Math.max(3, Math.min(14, parseInt($('h').value) || level.H));
   level.W = W; level.H = H;
   level.pieces = level.pieces.filter(p => p.r + p.h <= H && p.c + p.w <= W);
+  level.walls = (level.walls || []).filter(([r, c]) => r < H && c < W);
   level.gates = level.gates.filter(gt => gt.start + gt.len <= (gt.side === 'L' || gt.side === 'R' ? H : W));
   changed();
 }
@@ -329,19 +450,25 @@ $('preset').addEventListener('change', e => {
   if (!v) return;
   level = clone(PRESETS[v]);
   sel = null; closeSolution(); syncInputs(); changed();
-  status(v === 'l198' ? 'Level 198 loaded (read from a screenshot).' : '', '');
+  $('adjust').hidden = true;
+  status(PRESETS[v].note || '', '');
   e.target.value = '';
 });
 
 function status(msg, cls) { const s = $('status'); s.textContent = msg; s.className = cls || ''; }
 
 // ── Solving ────────────────────────────────────────────────
+function pieceName(p) {
+  const col = p.crate ? 'Crate' : NAMES[p.color] + (p.inner ? '/' + NAMES[p.inner].toLowerCase() : '');
+  return `${col} ${p.shape ? p.shape.length + '-block' : p.h + '×' + p.w}`;
+}
+
 function describe(s) {
   const p = s.before.pieces.find(x => x.id === s.pieceId);
-  const name = `${NAMES[p.color]} ${p.h}×${p.w} (row ${s.fromR + 1}, col ${s.fromC + 1})`;
+  const name = `${pieceName(p)} (row ${s.fromR + 1}, col ${s.fromC + 1})`;
   if (s.kind === 'exit') {
     const gt = s.before.gates.find(x => x.id === s.gateId);
-    return `${name} → out the ${SIDE[gt.side]} exit`;
+    return `${name} → out the ${SIDE[gt.side]} exit` + (p.inner ? ` (the ${NAMES[p.inner].toLowerCase()} core stays)` : '');
   }
   return `Move ${name} → row ${s.r + 1}, col ${s.c + 1}` + (s.wait ? ' (to thaw an exit)' : '');
 }
@@ -420,10 +547,11 @@ let playing = false, animating = false;
 function stepForward() {
   if (animating || !sol || stepIdx >= sol.steps.length) return Promise.resolve(false);
   const s = sol.steps[stepIdx];
-  const mover = document.querySelector('.piece.moving');
+  const mover = document.querySelector('.pwrap.moving');
   const p = s.before.pieces.find(x => x.id === s.pieceId);
   const pts = Engine.path(level, s.before, s.pieceId, s.r, s.c);
-  if (s.kind === 'exit') {
+  const leaves = s.kind === 'exit' && !p.inner;
+  if (leaves) {
     const gt = s.before.gates.find(x => x.id === s.gateId);
     pts.push(gt.side === 'L' ? [s.r, -p.w] : gt.side === 'R' ? [s.r, level.W]
            : gt.side === 'T' ? [-p.h, s.c] : [level.H, s.c]);
@@ -437,10 +565,10 @@ function stepForward() {
   const total = dist[dist.length - 1] || 1;
   const { cs, g } = metrics();
   const frames = corners.map(([r, c], i) => ({
-    left: (g + c * cs + 2) + 'px', top: (g + r * cs + 2) + 'px', offset: dist[i] / total,
-    opacity: s.kind === 'exit' && i === corners.length - 1 ? 0 : 1,
+    left: (g + c * cs) + 'px', top: (g + r * cs) + 'px', offset: dist[i] / total,
+    opacity: leaves && i === corners.length - 1 ? 0 : 1,
   }));
-  document.querySelectorAll('.ghost').forEach(x => x.remove());
+  document.querySelectorAll('.pwrap.ghost').forEach(x => x.remove());
   animating = true;
   const anim = mover.animate(frames, { duration: Math.max(300, total * 140), easing: 'ease-in-out', fill: 'forwards' });
   return anim.finished.then(() => { animating = false; goStep(stepIdx + 1); return true; },
@@ -481,16 +609,58 @@ $('edit').addEventListener('click', () => { closeSolution(); status(''); });
 let impRect = null, impDrag = null;
 const img = $('imp-img'), stage = $('imp-stage'), box = $('imp-box');
 
-function openImport(blob) {
-  img.src = URL.createObjectURL(blob);
-  impRect = null; box.hidden = true; $('imp-go').disabled = true;
-  const last = (() => { try { return JSON.parse(localStorage.getItem('blockout_import_size')); } catch { return null; } })() || [7, 10];
-  $('imp-w').value = last[0]; $('imp-h').value = last[1];
-  closeSolution();
-  $('import').hidden = false; $('editor').hidden = true;
-  status('');
-  $('import').scrollIntoView({ behavior: 'smooth', block: 'start' });
+let pixels = null, lastFound = null;
+
+function imagePixels() {
+  const cv = document.createElement('canvas');
+  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  return ctx.getImageData(0, 0, cv.width, cv.height);
 }
+
+function openImport(blob) {
+  closeSolution();
+  status('Reading the screenshot…');
+  img.onload = () => {
+    pixels = imagePixels();
+    const found = Detect.locate(pixels);
+    if (found) useBoard(found.rect, found.W, found.H);
+    else showManual("Couldn't find the board by itself. Drag a box over the grid of blocks, inside the frame.");
+  };
+  img.src = URL.createObjectURL(blob);
+}
+
+function showManual(msg, rect, W, H) {
+  const last = (() => { try { return JSON.parse(localStorage.getItem('blockout_import_size')); } catch { return null; } })() || [7, 10];
+  $('imp-msg').textContent = msg;
+  $('imp-w').value = W || last[0]; $('imp-h').value = H || last[1];
+  impRect = null; box.hidden = true; $('imp-go').disabled = true;
+  $('import').hidden = false; $('editor').hidden = true; $('adjust').hidden = true;
+  status('');
+  requestAnimationFrame(() => {
+    if (rect) {
+      const k = img.getBoundingClientRect().width / img.naturalWidth;
+      impRect = { x: rect.x * k, y: rect.y * k, w: rect.w * k, h: rect.h * k };
+      drawBox(); $('imp-go').disabled = false;
+    }
+    $('import').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+function useBoard(rect, W, H) {
+  lastFound = { rect, W, H };
+  level = Detect.run(pixels, rect, W, H);
+  sel = null; closeImport(); syncInputs(); changed();
+  const nums = level.pieces.filter(p => p.ice || p.lock).length + level.gates.filter(gt => gt.frozen).length;
+  status(`Found a ${W}×${H} board: ${level.pieces.length} pieces, ${level.gates.length} exits.` +
+    (nums ? ` Now tap each ❄ ice, 📦 crate, 🔒 lock and frozen exit (${nums}) and type its number.` : ''), 'ok');
+  $('adjust').hidden = false;
+}
+
+$('adjust').addEventListener('click', () => {
+  if (lastFound) showManual('Adjust the box so it covers exactly the grid of blocks, then Detect.', lastFound.rect, lastFound.W, lastFound.H);
+});
 
 $('file').addEventListener('change', e => {
   const f = e.target.files[0];
@@ -554,16 +724,7 @@ $('imp-go').addEventListener('click', () => {
   const W = parseInt($('imp-w').value), H = parseInt($('imp-h').value);
   try { localStorage.setItem('blockout_import_size', JSON.stringify([W, H])); } catch {}
   const k = img.naturalWidth / img.getBoundingClientRect().width;
-  const cv = document.createElement('canvas');
-  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
-  const ctx = cv.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0);
-  level = Detect.run(ctx.getImageData(0, 0, cv.width, cv.height),
-    { x: impRect.x * k, y: impRect.y * k, w: impRect.w * k, h: impRect.h * k }, W, H);
-  sel = null; closeImport(); syncInputs(); changed();
-  const nums = level.pieces.filter(p => p.ice || p.lock).length + level.gates.filter(gt => gt.frozen).length;
-  status(`Read ${level.pieces.length} pieces and ${level.gates.length} exits.` +
-    (nums ? ` Now set the numbers: tap each ❄ ice block, 🔒 lock and frozen exit (${nums}) and type its count.` : ''), 'ok');
+  useBoard({ x: impRect.x * k, y: impRect.y * k, w: impRect.w * k, h: impRect.h * k }, W, H);
 });
 
 window.addEventListener('resize', render);
