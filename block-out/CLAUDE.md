@@ -65,13 +65,18 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
   cells connected to it; other frame-coloured cells are crates (crate planks ≈ frame colour).
   Seams = a thin line < 60% as bright as the faces beside it, sampled away from the border's middle
   (keys sit there). Ice blocks touch without seams, so they're split by where their digits sit.
-  Seam also = ≥90% of the border <80% as bright (3D edge between stacked pieces).
+  Seams are judged against the cell's own mid-lines (studs repeat twice per cell, so inside a piece a
+  border looks like a mid-line; a seam between pieces is < 75% as bright over half its length).
   Padlock = icon cell on a piece colour with gold + a red/blue badge near its middle. Icons at a piece's
   centre (own cells only, core colour ignored): key = mostly gold + a red/blue gem, battery = purple,
   rocket = mostly red. Frame-coloured groups are crates only with an orange/red rim, else walls.
   Layered = per-cell 7×7 colour histogram with two unrelated colours (shading partners folded in),
   the rim colour is outer, the centre colour the core. Track = olive cell average; its rim gives the
-  colour. Frozen tiles spanning several cells: split only where a strip of frame shows between tiles.
+  colour. Frozen tiles spanning several cells: split only where a dark gap runs across the tile's inner
+  and outer edges (its number sits in the middle, often right on a cell border).
+  Walls from the background flood need 2+ sides on the board edge or other walls (a thin gap between
+  frozen tiles can leak the flood into one empty cell). A crate's number badge always joins its crate.
+  Ice without readable digits stays whole if its cells form a rectangle.
   Exit colour = nearest piece colour of the darker 60% of coloured samples (exits are two-tone and
   carry a white arrow). Star cell = ≥12% pale unsaturated pixels spread over 3+ quarters (a centred
   icon isn't); colour from the non-pale pixels; starry cells among crate cells are crate (moons).
@@ -86,6 +91,7 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
 - "Level 204" preset → 5 out in ~1 s, then the right exit thaws with an unknown colour.
 - Level 207 start screenshot (counters 4/7/7/7, crate 7) → 24 pieces, 5 exits; solve ≈ 20 s → 107 moves,
   6 out, then "take a new screenshot" (top-left exit thawed). With that exit set to purple: 75 moves, 8 out.
+- Level 213 → 7×12: 6×7 crate, wall row with a gap, T/green/orange/ice whole; 3 moves then screenshot.
 - Level 211 screenshots → 7×9; later state: 12 of 15 out, then two thawed exits need a screenshot.
 - "Level 205" preset (top exit 10) → 10 pieces out, then the top exit thaws with an unknown colour.
 - Importing the Level 198 / 204 / 205 screenshots: 7×10 (31 pieces, 11 exits) / 7×10 (14, 5) / 7×8 (14, 4 + 24 tracks).

@@ -367,6 +367,20 @@ const Detect = (() => {
         isWall[j] = 1; q.push(j);
       }
     }
+    // Real walls hang together with the board edge or other walls on 2+ sides; a lone cell that
+    // the background flood reached through a thin gap in the frame is just an empty cell.
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let i = 0; i < W * H; i++) {
+        if (!isWall[i]) continue;
+        const r = Math.floor(i / W), c = i % W;
+        const sides = [[1,0],[-1,0],[0,1],[0,-1]].filter(([dr, dc]) => {
+          const nr = r + dr, nc = c + dc;
+          return nr < 0 || nc < 0 || nr >= H || nc >= W || isWall[nr * W + nc];
+        }).length;
+        if (sides < 2) { isWall[i] = 0; changed = true; }
+      }
+    }
     const walls = [];
     for (let i = 0; i < W * H; i++) {
       if (isWall[i]) { walls.push([Math.floor(i / W), i % W]); cls[i] = 'wall'; }
@@ -384,13 +398,17 @@ const Detect = (() => {
     }
     // A crate's number badge makes its cell look like something else; it belongs to the crate.
     for (let i = 0; i < W * H; i++) {
-      if (!odd[i] || cls[i] === 'crate') continue;
+      if ((!odd[i] && cls[i] !== 'wall') || cls[i] === 'crate') continue;
       const r = Math.floor(i / W), c = i % W;
       const nb = [[1,0],[-1,0],[0,1],[0,-1]].filter(([dr, dc]) => {
         const nr = r + dr, nc = c + dc;
         return nr >= 0 && nc >= 0 && nr < H && nc < W && cls[nr * W + nc] === 'crate';
       }).length;
-      if (nb >= 3) cls[i] = 'crate';
+      if (nb >= 3) {
+        cls[i] = 'crate';
+        const k = walls.findIndex(([wr, wc]) => wr === r && wc === c);
+        if (k >= 0) walls.splice(k, 1);
+      }
     }
 
     // Separate pieces are divided by a dark seam (crates by their orange border); cells of one piece aren't.
@@ -398,21 +416,23 @@ const Detect = (() => {
     const find = i => parent[i] === i ? i : (parent[i] = find(parent[i]));
     const lum = ([R, G, B]) => R * 0.3 + G * 0.59 + B * 0.11;
     const joined = (a, b, pts, nx, ny) => {
-      if (cls[a] !== cls[b] || NOT_PIECE.has(cls[a]) || cls[a] === 'wall' || lockCell[a] || lockCell[b]) return false;
+      if (cls[a] !== cls[b] || NOT_PIECE.has(cls[a]) || cls[a] === 'wall') return false;
+      if (cls[a] !== 'crate' && (lockCell[a] || lockCell[b])) return false;
+      if (cls[a] === 'crate' && (odd[a] || odd[b])) return true; // the number badge is part of its crate
       if (cls[a] === 'crate') return pts.filter(([x, y]) => ['crate', 'frame'].includes(classify(at(x, y, 1)))).length / pts.length > 0.5;
       // Star outlines make the inside of a star piece busy; only a navy gap separates two of them.
       if (starCell[a] && starCell[b]) return pts.filter(([x, y]) => { const [R, G, B] = at(x, y, 1); return R + G + B < 230 && B >= Math.max(R, G); }).length / pts.length < 0.5;
       const w = Math.max(2, Math.round(0.06 * cw)), side = 0.25 * cw;
-      // Seam: clearly dark over half its length, or a little darker along (almost) all of it —
-      // the 3D edge between two stacked pieces. Stud shadows only darken parts of an inner border.
+      // Studs repeat twice per cell, so inside a piece a cell border looks just like the line
+      // through the middle of a cell. A seam between two pieces is darker than those mid-lines.
       const ratios = pts.map(([x, y]) => {
-        let line = Infinity;
-        for (let o = -w; o <= w; o++) line = Math.min(line, lum(at(x + nx * o, y + ny * o, 0)));
-        const faces = Math.min(lum(at(x - nx * side, y - ny * side, 1)), lum(at(x + nx * side, y + ny * side, 1)));
-        return line / Math.max(1, faces);
+        const low = (x0, y0) => { let m = Infinity; for (let o = -w; o <= w; o++) m = Math.min(m, lum(at(x0 + nx * o, y0 + ny * o, 0))); return m; };
+        const line = low(x, y);
+        const mid = (low(x - nx * 0.5 * cw, y - ny * 0.5 * ch) + low(x + nx * 0.5 * cw, y + ny * 0.5 * ch)) / 2;
+        return line / Math.max(1, mid);
       });
       const dark = t => ratios.filter(v => v < t).length / ratios.length;
-      return !(dark(0.6) >= 0.5 || dark(0.8) >= 0.9);
+      return !(dark(0.75) >= 0.5);
     };
     // Skip the middle of each border: icons (keys) sit on a piece's centre, often across a border.
     const along = () => [0.1, 0.15, 0.2, 0.25, 0.3, 0.7, 0.75, 0.8, 0.85, 0.9];
@@ -521,6 +541,10 @@ const Detect = (() => {
           if (f > 0.012) cands.push({ f, cover });
         }
       }
+      if (!cands.length) {
+        const rs = cells.map(i => Math.floor(i / W)), cs = cells.map(i => i % W);
+        if ((Math.max(...rs) - Math.min(...rs) + 1) * (Math.max(...cs) - Math.min(...cs) + 1) === cells.length) return [cells];
+      }
       cands.sort((a, b) => b.f - a.f);
       const out = [];
       for (const cd of cands) {
@@ -575,7 +599,13 @@ const Detect = (() => {
           kinds[k] = kinds[k - 1];
       // Neighbouring frozen tiles are separated by a strip of frame; one long tile isn't
       // (its number may sit right on the cell border, so look for the frame, not for ice).
-      const gap = t => [0.15, 0.3, 0.5, 0.65].filter(d => ['frame', 'empty'].includes(classify(at(...pos(t, d), 1)))).length >= 2;
+      const lumG = v => v[0] * 0.3 + v[1] * 0.59 + v[2] * 0.11;
+      // Only near the tile's inner and outer edges: a tile's number sits in the middle of it.
+      const gap = t => [0.06, 0.12, 0.62, 0.7].filter(d => {
+        let low = Infinity;
+        for (let o = -0.05; o <= 0.051; o += 0.01) low = Math.min(low, lumG(at(...pos(t + o, d), 0)));
+        return low < 130;
+      }).length >= 3;
       for (let k = 0; k < n; k++) {
         const l = kinds[k];
         if (!l) continue;
