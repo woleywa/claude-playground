@@ -475,6 +475,13 @@ function buildChips() {
   }
 }
 
+// With the edit menu closed, taps on the board just select (to type in counts).
+$('edit-menu').addEventListener('toggle', () => {
+  if ($('edit-menu').open) return;
+  tool = 'select';
+  [...$('tools').children].forEach(b => b.classList.toggle('on', b.dataset.tool === 'select'));
+});
+
 $('tools').addEventListener('click', e => {
   const t = e.target.dataset.tool;
   if (!t) return;
@@ -577,7 +584,7 @@ $('solve').addEventListener('click', () => {
   const t0 = performance.now();
   status('Solving…');
   try {
-    worker = new Worker('worker.js?v=10');
+    worker = new Worker('worker.js?v=11');
   } catch {
     setTimeout(() => showResult(Engine.solve(level, 20000), performance.now() - t0), 20);
     return;
@@ -594,8 +601,7 @@ $('solve').addEventListener('click', () => {
 function openSolution() {
   $('solution').hidden = false;
   $('player').hidden = false;
-  ['tools', 'chips', 'inspector'].forEach(id => $(id).hidden = true);
-  document.querySelector('#editor .size-row').hidden = true;
+  ['edit-menu', 'inspector'].forEach(id => $(id).hidden = true);
   const ol = $('steps');
   ol.innerHTML = '';
   sol.steps.forEach((s, i) => {
@@ -624,8 +630,7 @@ function closeSolution() {
   sol = null;
   $('solution').hidden = true;
   $('player').hidden = true;
-  ['tools', 'chips'].forEach(id => $(id).hidden = false);
-  document.querySelector('#editor .size-row').hidden = false;
+  $('edit-menu').hidden = false;
   render(); inspector();
 }
 

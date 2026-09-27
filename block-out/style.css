@@ -25,7 +25,6 @@ body {
 header { text-align: center; }
 .back { color: var(--dim); font-size: 0.8rem; text-decoration: none; }
 h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.03em; margin-top: 6px; }
-.sub { color: var(--dim); font-size: 0.85rem; margin-top: 2px; }
 
 .bar, .tools, .chips, .size-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
 
@@ -138,3 +137,7 @@ input[type=number] {
 .help summary { cursor: pointer; font-weight: 600; color: var(--text); }
 .help p { margin-top: 8px; }
 .check input { accent-color: var(--accent); }
+
+#edit-menu { max-width: 560px; margin-bottom: 8px; padding: 8px 14px; }
+#edit-menu summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+#edit-menu > :not(summary) { margin-top: 10px; }
