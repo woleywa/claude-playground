@@ -39,7 +39,7 @@ h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.03em; margin-top: 6
 .tools button.on { border-color: var(--text); background: #2a2a2a; }
 
 .chip {
-  width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
+  width: 36px; height: 36px; border-radius: 8px; cursor: pointer;
   border: 3px solid transparent; color: #fff; font-weight: 800; font-size: 0.9rem;
   display: flex; align-items: center; justify-content: center;
 }
@@ -76,6 +76,13 @@ input[type=number] {
   text-shadow: 0 1px 2px rgba(0,0,0,0.6);
 }
 .plabel.dark { color: #0c4a6e; text-shadow: none; }
+.piece.studs {
+  background-image: radial-gradient(circle at 50% 44%, rgba(255,255,255,0.42) 0 14%, rgba(255,255,255,0.16) 15% 26%, rgba(0,0,0,0.16) 27% 31%, transparent 32%);
+  background-size: 50% 50%;
+}
+.plabel .icon { display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.45)); }
+.plabel .icon svg { width: 100%; height: 100%; display: block; }
+.chains { position: absolute; left: 0; top: 0; pointer-events: none; }
 .piece.crate {
   box-shadow: none !important;
   background: repeating-linear-gradient(0deg, #4c3aa8 0 9px, #3f2f94 9px 11px);

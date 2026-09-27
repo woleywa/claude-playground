@@ -1,5 +1,6 @@
 // Rules + solver. Pure functions, no DOM.
-// piece: { id, color, r, c, h, w, shape?, key, lock, ice, inner?, crate? }
+// piece: { id, color, r, c, h, w, shape?, key, keyColor?, lock, lockColor?, chain?, ice, inner?, crate? }
+//   keyColor = the key's gem colour; lockColor = a chained piece's padlock badge colour
 //   shape = [[dr, dc], …] cell offsets for non-rectangular pieces (absent = full h×w rectangle)
 //   color '?' = unknown (still under ice / inside a crate); inner = colour left behind when it leaves
 //   axis 'h' | 'v' = arrow piece, moves (and leaves) only along it; star = leaves only through star exits
@@ -127,7 +128,8 @@ const Engine = (() => {
     const tick = level.tickPerCell ? offsets(p).length : 1;
     for (const q of st.pieces) {
       if (q.ice) q.ice = Math.max(0, q.ice - tick);
-      if (p.key && q.lock && q.color === p.color) q.lock--;
+      // A chained piece's padlock (lockColor = badge) opens for keys with that gem colour.
+      if (p.key && q.lock && (q.lockColor ? (p.keyColor || p.color) === q.lockColor : q.color === p.color)) q.lock--;
     }
     st.gates = st.gates.map(gt => gt.frozen ? { ...gt, frozen: gt.frozen - 1 } : gt);
   }
@@ -254,7 +256,7 @@ const Engine = (() => {
         if (ok) (lanes[a] = lanes[a] || []).push(lane);
       }
     }
-    const sig = rel.map((p, k) => k === T ? '#' : [p.color, p.inner || '', p.key ? 1 : 0, p.lock, p.axis || '', p.star ? 1 : 0, p.shape ? JSON.stringify(p.shape) : p.h + 'x' + p.w].join('|'));
+    const sig = rel.map((p, k) => k === T ? '#' : [p.color, p.inner || '', p.key ? 1 + (p.keyColor || '') : 0, p.lock + (p.lockColor || ''), p.axis || '', p.star ? 1 : 0, p.shape ? JSON.stringify(p.shape) : p.h + 'x' + p.w].join('|'));
     const groups = [...new Set(sig)].map(g => sig.map((s2, k) => s2 === g ? k : -1).filter(k => k >= 0));
     // Positions are stored flat (K numbers per state) and remembered by a 64-bit hash of the
     // canonical (per-group sorted) positions, which keeps a million+ states within phone memory.

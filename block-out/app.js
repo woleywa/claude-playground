@@ -1,9 +1,20 @@
 const $ = id => document.getElementById(id);
 const clone = o => JSON.parse(JSON.stringify(o));
 
+// The game's own piece colours, measured on screenshots.
 const COLORS = {
-  pink: '#EC4899', yellow: '#EAB308', sky: '#38BDF8', lime: '#84CC16', blue: '#2563EB',
-  purple: '#9333EA', green: '#10B981', red: '#EF4444', orange: '#F97316', '?': '#475569',
+  pink: '#E8409B', yellow: '#EEAE0B', sky: '#1296E6', lime: '#6FC20E', blue: '#0F57DC',
+  purple: '#9333E2', green: '#0A9A3A', red: '#E02B20', orange: '#ED5F09', '?': '#475569',
+};
+
+// Icons drawn to look like the game's: key with its gem, rocket, battery, padlock, crate badge.
+const GEM = { red: '#E8174F', blue: '#1E6CF0' };
+const ICONS = {
+  key: gem => `<svg viewBox="0 0 40 40"><g stroke="#8a5a00" stroke-width="1.5"><rect x="9" y="17" width="20" height="6" rx="2" fill="#F7C531" transform="rotate(-45 20 20)"/><rect x="8" y="24" width="6" height="5" fill="#F7C531" transform="rotate(-45 20 20)"/><rect x="21" y="3" width="16" height="16" rx="4" fill="#F7C531"/></g><rect x="25" y="7" width="8" height="8" rx="2" fill="${GEM[gem] || GEM.red}"/><rect x="26.5" y="8.5" width="3" height="2.5" fill="#fff" opacity=".8"/></svg>`,
+  rocket: () => `<svg viewBox="0 0 40 40"><path d="M20 3c6 5 8 12 7 20H13c-1-8 1-15 7-20z" fill="#fff" stroke="#9aa" stroke-width="1"/><path d="M20 3c4 3 6 7 6.5 11h-13C14 10 16 6 20 3z" fill="#E8231C"/><circle cx="20" cy="18" r="3.2" fill="#2E7BEF" stroke="#fff" stroke-width="1.2"/><path d="M13 20l-6 9 7-2zM27 20l6 9-7-2z" fill="#E8231C"/><path d="M16 23h8l-2 6h-4z" fill="#F7C531"/></svg>`,
+  battery: () => `<svg viewBox="0 0 40 40"><rect x="15" y="3" width="10" height="5" rx="1.5" fill="#F7C531" stroke="#8a5a00"/><rect x="10" y="7" width="20" height="30" rx="5" fill="#8E3AD9" stroke="#4b1a86" stroke-width="1.5"/><rect x="10" y="15" width="20" height="13" fill="#2E7BEF"/><path d="M21 16l-5 7h4l-1 5 5-7h-4z" fill="#F7C531"/></svg>`,
+  padlock: (n, badge) => `<svg viewBox="0 0 40 40"><path d="M12 18v-5a8 8 0 0 1 16 0v5" fill="none" stroke="#C99A1E" stroke-width="4"/><rect x="7" y="16" width="26" height="21" rx="5" fill="#F7C531" stroke="#8a5a00" stroke-width="1.5"/><rect x="12" y="19" width="16" height="15" rx="3" fill="${badge === 'blue' ? '#1E4FC2' : '#B3122F'}"/><text x="20" y="31" font-size="13" font-weight="900" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${n}</text></svg>`,
+  badge: n => `<svg viewBox="0 0 40 40"><rect x="5" y="7" width="30" height="26" rx="6" fill="#F0A31A"/><rect x="8" y="10" width="24" height="20" rx="4" fill="#7E1620"/><text x="20" y="26" font-size="15" font-weight="900" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif">${n}</text></svg>`,
 };
 const NAMES = {
   pink: 'Pink', yellow: 'Yellow', sky: 'Sky', lime: 'Lime', blue: 'Blue',
@@ -204,24 +215,36 @@ function pieceEl(p, r0, c0, cs, g, ghost) {
       if (offs.length > 1) d.style.boxShadow = 'none';
       if (p.crate) d.classList.add('crate');
       else if (p.ice) d.classList.add('ice');
-      else d.style.background = COLORS[p.color];
-      if (p.inner) { d.style.background = COLORS[p.inner]; d.style.boxShadow = `inset 0 0 0 ${Math.round(cs * 0.27)}px ${COLORS[p.color]}`; }
+      else { d.style.backgroundColor = COLORS[p.color]; d.classList.add('studs'); }
+      if (p.inner) { d.style.backgroundColor = COLORS[p.inner]; d.style.boxShadow = `inset 0 0 0 ${Math.round(cs * 0.27)}px ${COLORS[p.color]}`; }
     }
     wrap.appendChild(d);
   }
   if (ghost) return wrap;
-  const bits = [];
-  if (p.ice) bits.push((p.crate ? '📦' : '❄') + p.ice);
-  if (p.lock) bits.push('🔒' + p.lock);
-  if (p.key) bits.push('🗝️');
-  if (p.item) bits.push(p.item === 'battery' ? '🔋' : '🚀');
+  const icons = [], bits = [];
+  if (p.ice && p.crate) icons.push(ICONS.badge(p.ice));
+  else if (p.ice) bits.push('❄' + p.ice);
+  if (p.lock) icons.push(ICONS.padlock(p.lock, p.lockColor));
+  if (p.key) icons.push(ICONS.key(p.keyColor));
+  if (p.item) icons.push(ICONS[p.item] ? ICONS[p.item]() : '');
   if (p.axis) bits.push(p.axis === 'h' ? '⇔' : '⇕');
   if (p.star) bits.push('★');
   if (p.color === '?' && !p.ice) bits.push('?');
-  if (bits.length) {
-    const mr = offs.reduce((s, q) => s + q[0], 0) / offs.length, mc = offs.reduce((s, q) => s + q[1], 0) / offs.length;
-    const [lr, lc] = p.shape ? offs.reduce((b, q) => Math.hypot(q[0] - mr, q[1] - mc) < Math.hypot(b[0] - mr, b[1] - mc) ? q : b) : [mr, mc];
+  const mr = offs.reduce((s, q) => s + q[0], 0) / offs.length, mc = offs.reduce((s, q) => s + q[1], 0) / offs.length;
+  // Chains run through the piece's middle lines, out from the padlock (as in the game).
+  if (p.lock && p.chain) {
+    const cy = (mr + 0.5) * cs, cx = (mc + 0.5) * cs;
+    const svg = `<svg class="chains" width="${p.w * cs}" height="${p.h * cs}"><g stroke="#C9C3F5" stroke-width="${Math.max(3, cs * 0.09)}" stroke-dasharray="${cs * 0.16} ${cs * 0.07}" stroke-linecap="round">` +
+      `<line x1="${cs * 0.12}" y1="${cy}" x2="${p.w * cs - cs * 0.12}" y2="${cy}"/><line x1="${cx}" y1="${cs * 0.12}" x2="${cx}" y2="${p.h * cs - cs * 0.12}"/></g></svg>`;
+    wrap.insertAdjacentHTML('beforeend', svg);
+  }
+  if (icons.length || bits.length) {
+    // On a 2×2 block (or a straight bar) the icon sits in the middle, like in the game; else on the
+    // cell nearest the middle.
+    const whole = !p.shape && (p.w <= 2 && p.h <= 2 || p.w === 1 || p.h === 1);
+    const [lr, lc] = whole ? [mr, mc] : offs.reduce((b, q) => Math.hypot(q[0] - mr, q[1] - mc) < Math.hypot(b[0] - mr, b[1] - mc) ? q : b);
     const lab = el('div', 'plabel' + (p.ice && !p.crate ? ' dark' : ''), { left: (lc * cs) + 'px', top: (lr * cs) + 'px', width: cs + 'px', height: cs + 'px' });
+    icons.forEach(svg => { const sp = el('span', 'icon', { width: (cs * (icons.length > 1 ? 0.5 : 0.7)) + 'px', height: (cs * (icons.length > 1 ? 0.5 : 0.7)) + 'px' }); sp.innerHTML = svg; lab.appendChild(sp); });
     bits.forEach(t => lab.appendChild(el('span')).textContent = t);
     wrap.appendChild(lab);
   }
@@ -477,6 +500,15 @@ function inspector() {
       l.append(cb, ' ' + text);
       return l;
     };
+    const choice = (text, value, opts, set) => {
+      const l = el('label'); l.append(text + ' ');
+      const s = el('select');
+      opts.forEach(([v, t]) => { const o = el('option'); o.value = v; o.textContent = t; s.appendChild(o); });
+      s.value = value;
+      s.addEventListener('change', () => { set(s.value); changed(); });
+      l.appendChild(s);
+      return l;
+    };
     const axis = el('label'); axis.append('Moves ');
     const sel = el('select');
     [['', 'any way'], ['h', '⇔ left/right'], ['v', '⇕ up/down']].forEach(([v, t]) => { const o = el('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
@@ -484,8 +516,11 @@ function inspector() {
     sel.addEventListener('change', () => { if (sel.value) obj.axis = sel.value; else delete obj.axis; save(); render(); });
     axis.appendChild(sel);
     row.append(axis, check('★ Star piece', obj.star, v => { if (v) obj.star = true; else delete obj.star; }),
-      check('🗝️ Key', obj.key, v => obj.key = v), check('📦 Crate', obj.crate, v => { obj.crate = v; if (v) { obj.color = '?'; obj.ice = obj.ice || 1; } }),
-      numberField('🔒 Lock', obj.lock, v => obj.lock = v), numberField(obj.crate ? '📦 Count' : '❄ Ice', obj.ice, v => obj.ice = v));
+      check('🗝️ Key', obj.key, v => obj.key = v),
+      ...(obj.key ? [choice('Gem', obj.keyColor || 'red', [['red', 'red'], ['blue', 'blue']], v => obj.keyColor = v)] : []), check('📦 Crate', obj.crate, v => { obj.crate = v; if (v) { obj.color = '?'; obj.ice = obj.ice || 1; } }),
+      numberField('🔒 Lock', obj.lock, v => obj.lock = v),
+      ...(obj.lock ? [check('⛓ Chained', obj.chain, v => { if (v) { obj.chain = true; obj.lockColor = obj.lockColor || 'red'; } else { delete obj.chain; delete obj.lockColor; } })] : []),
+      ...(obj.lock && obj.chain ? [choice('Badge', obj.lockColor || 'red', [['red', 'red'], ['blue', 'blue']], v => obj.lockColor = v)] : []), numberField(obj.crate ? '📦 Count' : '❄ Ice', obj.ice, v => obj.ice = v));
     if (Engine.cellsOf(obj).length > 1) {
       const split = el('button', 'btn'); split.textContent = 'Split into cells';
       split.addEventListener('click', () => {
@@ -812,7 +847,7 @@ function useBoard(rect, W, H) {
   level = Detect.run(pixels, rect, W, H);
   sel = null; closeImport(); syncInputs(); changed();
   const counters = level.pieces.filter(p => p.ice || p.lock).length + level.gates.filter(gt => gt.frozen).length;
-  const unread = level.pieces.filter(p => (p.ice && !p.read) || p.lock).length + level.gates.filter(gt => gt.frozen && !gt.read).length;
+  const unread = level.pieces.filter(p => (p.ice || p.lock) && !p.read).length + level.gates.filter(gt => gt.frozen && !gt.read).length;
   status(`Read ${level.pieces.length} pieces and ${level.gates.length} exits` +
     (counters ? `, and ${counters - unread} of ${counters} numbers` : '') + '.' +
     (unread ? ` Tap the ${unread} unread one${unread > 1 ? 's' : ''} (❄ ice, 📦 crate, 🔒 lock, frozen exit) to type the number.` : counters ? ' Check them against the game before solving.' : ''), 'ok');

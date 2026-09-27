@@ -33,6 +33,9 @@ Vanilla HTML + CSS + JS, no build step, no dependencies. Hosted on GitHub Pages 
 - Arrow pieces (`axis: 'h'|'v'`, flat face with a big ⇔/⇕): move and leave only along the arrow.
 - Star pieces (`star`, cream star studs) leave only through star exits (`gate.star`); normal pieces
   may use star exits too (Level 211).
+- Chained piece (`chain`, `lock` = padlock number, `lockColor` = badge colour): each key piece whose gem
+  (`keyColor`) matches the badge that leaves counts it down (Level 218, confirmed). 1×1 lock cells keep
+  the old rule (key piece of the lock's own colour).
 - Crates (`crate: true`, colour `'?'`): count down like ice; contents are unknown until they open (usually more pieces).
 - Colours under ice, inside crates and of frozen exits are unknown (`'?'`) until they thaw.
 
@@ -127,4 +130,21 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
   screenshot (two frozen exits thawed).
 - Level 216 → 8×10: 8×4 crate 5, purple track 2×3, inner exits sky ▼ / blue ▼ (2 wide) / frozen 1;
   13 moves, blue out, then a screenshot (the inner frozen exit thawed).
+- Level 218 → 7×10 (staircase): chained yellow 2×2 padlock 3 (red badge), 3 red-gem keys, layered
+  L pieces, sky bottom exit; solver needs ~45 s for the first exit (sky out at the bottom).
 - Importing the Level 198 / 204 / 205 screenshots: 7×10 (31 pieces, 11 exits) / 7×10 (14, 5) / 7×8 (14, 4 + 24 tracks).
+
+## Level 218 notes (detection)
+- Grid: when the plain lattice misses the squareness test (a side edge found a little off), square
+  cells sized from the height are tried, aligned to either side (Safari-like coarse resampling).
+- Chains: lavender links (|R−G|<30, B > max+25, B−R<90, lum>100) along ≥40% of a border between two
+  cells join them; the padlock is the chained line end/middle with the most dark-red badge pixels;
+  the cells around it join; number read with the crate-badge OCR style.
+- Padlock cells (1×1 lock) need white digit pixels too (a key cell is gold with a red gem, no white).
+- Icons are looked for at every cell centre, between neighbouring cells and at 2×2 junctions (keys on
+  L-pieces sit on one cell). Gold isn't counted when choosing the spot on yellow/orange pieces.
+- Layered cells with the same core join unless a navy gap separates them.
+- Exit runs of partner colours (sky/blue) are decided from all their samples together.
+- Star cells need ≥8 cream samples in all four quarters.
+- App draws pieces in the game's colours with studs and SVG lookalike icons (key+gem, rocket, battery,
+  padlock+chains, crate badge).

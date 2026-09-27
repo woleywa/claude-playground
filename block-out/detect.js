@@ -1,5 +1,5 @@
 // Screenshot → level. locate() finds the board on its own; run() reads the cells.
-// Numbers (ice, crate, lock, frozen counts) are not read — the user types them.
+// Numbers (ice, crate, chain padlock, frozen counts) are read by OCR; the user checks them.
 const Detect = (() => {
   const hex = h => [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
   // Whole-cell average colours measured on real screenshots (studs and shading averaged out).
@@ -206,11 +206,17 @@ const Detect = (() => {
       if (m < 3 || m > 16 || Math.abs(Hg / cs - m) > 0.35) continue;
       tries.push({ n, m, cs, x0: gx0, y0: topMir ? gy1 + 1 - m * cs : gy0, sq: 1 });
     } else for (let n = 3; n <= 12; n++) {
-      const cs = Wg / n, m = Math.round(Hg / cs);
-      if (m < 3 || m > 16 || Math.abs(Hg / cs - m) > 0.15) continue;
-      tries.push({ n, m, cs, x0: gx0, y0: gy0, sq: Math.max(0, 1 - Math.abs(Hg / cs - m) / 0.5) });
+      const cs = Wg / n, m = Math.round(Hg / cs), dev = Math.abs(Hg / cs - m);
+      if (m < 3 || m > 16 || dev > 0.3) continue;
+      if (dev <= 0.15) tries.push({ n, m, cs, x0: gx0, y0: gy0, sq: Math.max(0, 1 - dev / 0.5), whole: true });
+      // One side edge can be found a little off (staircase edges, coarse resampling): also try
+      // square cells sized from the height, lined up with either side.
+      if (dev > 0.15) {
+        const c2 = Hg / m;
+        for (const x0 of [gx0, gx1 + 1 - n * c2]) tries.push({ n, m, cs: c2, x0, y0: gy0, sq: Math.max(0, 1 - dev / 0.5) });
+      }
     }
-    for (const { n, m, cs, x0: gx0, y0: gy0, sq } of tries) {
+    for (const { n, m, cs, x0: gx0, y0: gy0, sq, whole } of tries) {
       const vals = [];
       // Let each line find its seam within a few % of a cell, so small edge errors don't matter.
       const win = [];
@@ -246,9 +252,13 @@ const Detect = (() => {
         }
       purity /= n * m;
       // Cells are square, so the right count also makes the rows come out (nearly) whole.
-      cands.push({ n, m, score, purity, fit: score * purity * purity * sq, rect: { x: gx0, y: gy0, w: n * cs, h: m * cs } });
+      cands.push({ n, m, score, purity, fit: score * purity * purity * sq, whole, rect: { x: gx0, y: gy0, w: n * cs, h: m * cs } });
     }
     if (!cands.length) return null;
+    // Keep the best alignment for each cell count.
+    const bestOf = new Map();
+    for (const c of cands) if (!bestOf.has(c.n) || c.fit > bestOf.get(c.n).fit) bestOf.set(c.n, c);
+    cands.length = 0; cands.push(...bestOf.values());
     const base = cands.reduce((a, b) => b.fit > a.fit ? b : a);
     // A lattice with twice the columns contains every true line too; only prefer it when its
     // seams score about as well, and never prefer an unrelated count.
@@ -257,7 +267,7 @@ const Detect = (() => {
     const pick = cands.filter(c => c.n % base.n === 0 && (c.score >= 0.8 * base.score
       || (base.purity < 0.8 && c.purity >= base.purity + 0.07 && c.score >= 0.6 * base.score))).sort((a, b) => b.n - a.n)[0];
 
-    return { rect: mirX || mirY ? pick.rect : { x: gx0, y: gy0, w: Wg, h: Hg }, W: pick.n, H: pick.m };
+    return { rect: mirX || mirY || !pick.whole ? pick.rect : { x: gx0, y: gy0, w: Wg, h: Hg }, W: pick.n, H: pick.m };
   }
 
   // rect = play grid in image pixels; W×H = cells.
@@ -295,10 +305,15 @@ const Detect = (() => {
         const near = [[0,0],[0,.18],[.15,.15],[-.15,.15],[0,-.2],[.12,0],[-.12,0],[.1,-.1],[-.1,-.1]]
           .map(([dx, dy]) => at(cx(c) + dx*cw, cy(r) + dy*ch, rad));
         // A padlock is largely gold (~25% of the cell); a rocket is mostly red with a little gold.
-        let goldN = 0;
-        for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) if (gold(at(cx(c) + (-0.35 + 0.0875 * i) * cw, cy(r) + (-0.35 + 0.0875 * j) * ch, 0))) goldN++;
+        // Its number is white; a key (also gold, with a red gem) shows no white.
+        let goldN = 0, whiteN = 0;
+        for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) {
+          const v = at(cx(c) + (-0.35 + 0.0875 * i) * cw, cy(r) + (-0.35 + 0.0875 * j) * ch, 0);
+          if (gold(v)) goldN++;
+          if (Math.min(...v) > 200) whiteN++;
+        }
         const goldHit = m.dist > 45 && (SOLID.has(vote(corners)) || vote(corners) === 'ice') && !['yellow', 'orange'].includes(vote(corners))
-          && goldN / 81 >= 0.15
+          && goldN / 81 >= 0.15 && whiteN >= 2
           && near.some(gold) && near.some(([R, G, B]) => (R > 170 && G < 70 && B < 70) || (!['blue', 'sky'].includes(vote(corners)) && B > 170 && R < 90 && G < 170));
         lockCell.push(goldHit);
         let label = m.dist > 45 ? vote(corners) : m.name;
@@ -334,8 +349,9 @@ const Detect = (() => {
         const top = Object.entries(merged).sort((a, b) => b[1] - a[1]);
         let core = null;
         // Star piece: cream star outlines over the piece colour; the colour is the strongest one.
-        // Stars fill all four quarters of a cell; an icon (battery) sits in the middle.
-        const starry = m.name !== 'frozen' && creamN / 49 >= 0.12 && faceN > 0 && quad.filter(q => q > 0).length >= 3;
+        // Stars fill all four quarters of a cell (≥8 of 49 samples); an icon (battery) sits in the
+        // middle and its gold plus stud highlights can reach 7 samples in three quarters.
+        const starry = m.name !== 'frozen' && creamN >= 8 && faceN > 0 && quad.every(q => q > 0);
         if (starry) label = nearestSolid(face.map(v => v / faceN));
         starCell.push(starry);
         // Narrow crates: the gold/red rim covers a cell's corners, but planks fill much of it.
@@ -456,12 +472,30 @@ const Detect = (() => {
     const parent = cls.map((_, i) => i);
     const find = i => parent[i] === i ? i : (parent[i] = find(parent[i]));
     const lum = ([R, G, B]) => R * 0.3 + G * 0.59 + B * 0.11;
+    // Chains (lavender links) run along the lines between a chained piece's cells, out from its padlock.
+    // Chain links are a light lavender metal: red ≈ green, blue a little higher.
+    const greyV = ([R, G, B]) => Math.abs(R - G) < 30 && B > Math.max(R, G) + 25 && B - R < 90 && R * 0.3 + G * 0.59 + B * 0.11 > 100;
+    const chained = [];
+    const chainOn = (a, nx, ny) => {
+      const r = Math.floor(a / W), c = a % W;
+      let g = 0, n = 0;
+      for (let t = 0.05; t < 0.96; t += 0.05) {
+        const x = nx ? rect.x + (c + 1) * cw : rect.x + (c + t) * cw, y = nx ? rect.y + (r + t) * ch : rect.y + (r + 1) * ch;
+        let hit = false;
+        for (let o = -0.06; o <= 0.061; o += 0.03) if (greyV(at(x + nx * o * cw, y + ny * o * ch, 0))) hit = true;
+        n++; if (hit) g++;
+      }
+      return g / n;
+    };
     const joined = (a, b, pts, nx, ny) => {
       if (cls[a] !== cls[b] || NOT_PIECE.has(cls[a]) || cls[a] === 'wall') return false;
+      if (SOLID.has(cls[a]) && chainOn(a, nx, ny) >= 0.4) { chained.push([Math.floor(a / W), a % W, nx]); return true; }
       if (cls[a] !== 'crate' && (lockCell[a] || lockCell[b])) return false;
       if (cls[a] === 'crate' && (badge[a] || badge[b])) return true; // the number badge is part of its crate
       if (cls[a] === 'crate') return pts.filter(([x, y]) => ['crate', 'frame'].includes(classify(at(x, y, 1)))).length / pts.length > 0.5;
       // Star outlines make the inside of a star piece busy; only a navy gap separates two of them.
+      // Layered cells with one core colour: the bright core makes the mid-lines a poor reference.
+      if (layer[a] && layer[a] === layer[b]) return pts.filter(([x, y]) => { const [R, G, B] = at(x, y, 1); return R + G + B < 230 && B >= Math.max(R, G); }).length / pts.length < 0.5;
       if (starCell[a] && starCell[b]) return pts.filter(([x, y]) => { const [R, G, B] = at(x, y, 1); return R + G + B < 230 && B >= Math.max(R, G); }).length / pts.length < 0.5;
       // An icon (battery) sitting on the border hides the seam: only judge points with the piece's
       // colour on both sides of the line.
@@ -497,6 +531,38 @@ const Detect = (() => {
         }
       }
 
+    // The padlock sits where the chains cross (a corner shared by the chained lines) or, on a
+    // piece one cell wide, in the middle of its chained line. Its piece's cells around it join.
+    const padlocks = [];
+    {
+      // Candidates: both ends and the middle of each chained line; the padlock is where its dark
+      // red number badge shows.
+      const cand = new Map();
+      for (const [r, c, nx] of chained) {
+        const pts = nx ? [[r, c + 1], [r + 1, c + 1], [r + 0.5, c + 1]] : [[r + 1, c], [r + 1, c + 1], [r + 1, c + 0.5]];
+        for (const [y, x] of pts) cand.set(y + ',' + x, [y, x]);
+      }
+      const badgeAt = (y, x) => {
+        let n = 0;
+        for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) {
+          const v = at(rect.x + (x + i * 0.04) * cw, rect.y + (y + j * 0.04) * ch, 0);
+          if (lum(v) < 80 && v[0] > 90 && v[0] > 2.5 * v[1]) n++;
+        }
+        return n;
+      };
+      const used = new Set();
+      for (const [y, x, sc] of [...cand.values()].map(([y, x]) => [y, x, badgeAt(y, x)]).sort((a, b) => b[2] - a[2])) {
+        if (sc < 3) break;
+        const ys = Number.isInteger(y) ? [y - 1, y] : [Math.floor(y)], xs = Number.isInteger(x) ? [x - 1, x] : [Math.floor(x)];
+        const around = ys.flatMap(rr => xs.map(cc => [rr, cc])).filter(([rr, cc]) => rr >= 0 && cc >= 0 && rr < H && cc < W).map(([rr, cc]) => rr * W + cc);
+        const col = cls[around.find(i => SOLID.has(cls[i]))];
+        const mine = around.filter(i => cls[i] === col);
+        if (mine.length < 2 || mine.some(i => used.has(i))) continue;
+        mine.forEach(i => { used.add(i); parent[find(i)] = find(mine[0]); });
+        padlocks.push({ x: rect.x + x * cw, y: rect.y + y * ch, cells: mine });
+      }
+    }
+
     const groups = new Map();
     cls.forEach((l, i) => {
       if (NOT_PIECE.has(l) || l === 'wall') return;
@@ -517,29 +583,62 @@ const Detect = (() => {
       if (cells.length !== h * w) p.shape = cells.map(i => [Math.floor(i / W) - r, i % W - c]);
       const cores = cells.map(i => layer[i]).filter(Boolean);
       const inner = !hidden && cores.length / cells.length >= 0.5 ? vote(cores) : null;
+      const pad = padlocks.find(q => q.cells.every(i => cells.includes(i)));
       if (!hidden && h * w === 1 && lockCell[r * W + c]) p.lock = 1;
+      else if (pad) {
+        // A chained piece: its padlock shows how many keys (of its badge colour) open it.
+        const n = readNumber(img, pad.x - 0.3 * cw, pad.y - 0.25 * ch, pad.x + 0.3 * cw, pad.y + 0.35 * ch, 'c');
+        p.lock = n || 1;
+        if (n) p.read = true;
+        let red = 0, blue = 0;
+        for (let i = -3; i <= 3; i++) for (let j = -2; j <= 4; j++) {
+          const v = at(pad.x + i * 0.04 * cw, pad.y + j * 0.04 * ch, 0);
+          if (v[0] > 110 && v[1] < 70 && v[2] < 90 && v[0] > 2 * v[1]) red++;
+          else if (v[2] > 130 && v[0] < 90) blue++;
+        }
+        p.lockColor = blue > red ? 'blue' : 'red';
+        p.chain = true;
+      }
       else if (!hidden && cells.filter(i => starCell[i]).length / cells.length < 0.5) {
         // Icons sit on the piece's centre: a key is mostly gold with a small red/blue gem, a battery
         // (time bonus) is a purple can, a rocket is mostly red. Only the piece's own cells count.
         const own = new Set(cells);
-        const mx = rect.x + (c + w / 2) * cw, my = rect.y + (r + h / 2) * ch;
-        const n = { gold: 0, red: 0, blue: 0, purple: 0 };
-        for (let i = -3; i <= 3; i++)
-          for (let j = -3; j <= 3; j++) {
-            const x = mx + i * 0.1 * cw, y = my + j * 0.1 * ch;
-            const cc = Math.floor((x - rect.x) / cw), rr = Math.floor((y - rect.y) / ch);
-            if (!own.has(rr * W + cc)) continue;
-            const v = at(x, y, rad);
-            // A layered piece's core colour is not an icon.
-            const not = (...ks) => !ks.includes(label) && !ks.includes(inner);
-            if (gold(v)) n.gold++;
-            else if (v[0] > 170 && v[1] < 80 && not('red', 'pink', 'orange')) n.red++;
-            else if (v[2] > 170 && v[0] < 90 && v[1] < 170 && not('blue', 'sky')) n.blue++;
-            if (not('purple') && classify(v) === 'purple') n.purple++;
-          }
+        // Look at the piece's middle, at each of its cells, and between neighbouring cells; the
+        // spot showing the most icon pixels is where the icon sits.
+        const spots = [[c + w / 2, r + h / 2]];
+        for (const i of cells) {
+          const y = Math.floor(i / W), x = i % W;
+          spots.push([x + 0.5, y + 0.5]);
+          if (own.has(i + 1) && x + 1 < W) spots.push([x + 1, y + 0.5]);
+          if (own.has(i + W)) spots.push([x + 0.5, y + 1]);
+          if (own.has(i + 1) && own.has(i + W) && own.has(i + W + 1) && x + 1 < W) spots.push([x + 1, y + 1]);
+        }
+        // A layered piece's core colour is not an icon.
+        const not = (...ks) => !ks.includes(label) && !ks.includes(inner);
+        const countAt = ([sx, sy]) => {
+          const n = { gold: 0, red: 0, blue: 0, purple: 0 };
+          for (let i = -3; i <= 3; i++)
+            for (let j = -3; j <= 3; j++) {
+              const x = rect.x + (sx + i * 0.1) * cw, y = rect.y + (sy + j * 0.1) * ch;
+              const cc = Math.floor((x - rect.x) / cw), rr = Math.floor((y - rect.y) / ch);
+              if (cc < 0 || cc >= W || !own.has(rr * W + cc)) continue;
+              const v = at(x, y, rad);
+              if (gold(v)) n.gold++;
+              else if (v[0] > 170 && v[1] < 80 && not('red', 'pink', 'orange')) n.red++;
+              else if (v[2] > 170 && v[0] < 90 && v[1] < 170 && not('blue', 'sky')) n.blue++;
+              if (not('purple') && classify(v) === 'purple') n.purple++;
+            }
+          return n;
+        };
         const plainGold = ['yellow', 'orange'].includes(label) || ['yellow', 'orange'].includes(inner);
+        const weight = q => (plainGold ? 0 : q.gold) + q.purple + q.red + q.blue;
+        const n = spots.map(countAt).reduce((a, b) => (weight(b) > weight(a) ? b : a));
         if (n.purple >= 4) p.item = 'battery';
-        else if (!plainGold && n.gold >= 4 && n.red + n.blue >= 1 && n.gold >= n.red + n.blue) p.key = true;
+        // On a red piece its red gem doesn't stand out, so enough gold alone makes a key there.
+        else if (!plainGold && n.gold >= 4 && (n.red + n.blue >= 1 || (label === 'red' && n.gold >= 6)) && n.gold >= n.red + n.blue) {
+          p.key = true;
+          p.keyColor = n.blue > n.red ? 'blue' : 'red';
+        }
         else if (n.red >= 4) p.item = 'rocket';
       }
       // Layered piece: most of its cells showed the same second colour inside.
@@ -627,7 +726,7 @@ const Detect = (() => {
     const gates = [];
     let gid = 1;
     const edge = (side, n, pos) => {
-      const kinds = [];
+      const kinds = [], bases = [];
       for (let k = 0; k < n; k++) {
         const raw = [-.42, -.34, -.26, .26, .34, .42].flatMap(t => [0.3, 0.5].map(d => at(...pos(k + 0.5 + t, d), rad)));
         const pts = raw.map(classify);
@@ -640,6 +739,20 @@ const Detect = (() => {
         const l = pts.filter(x => x === 'frozen').length >= 3 ? 'frozen'
           : solid.length ? nearestSolid([0, 1, 2].map(ch => base.reduce((a, v) => a + v[ch], 0) / base.length)) : vote(pts);
         kinds.push(['frame', 'empty', 'ice', 'crate', 'white', 'track'].includes(l) ? null : l);
+        bases.push(base);
+      }
+      // One exit can read as two related colours cell by cell (sky / blue with shading): decide a
+      // run of such neighbours from all its samples together.
+      for (let k = 0; k < n; k++) {
+        if (!kinds[k] || kinds[k] === 'frozen') continue;
+        let e = k;
+        while (e + 1 < n && kinds[e + 1] && kinds[e + 1] !== 'frozen' && (kinds[e + 1] === kinds[e] || (PARTNER[kinds[e]] || []).includes(kinds[e + 1]))) e++;
+        if (new Set(kinds.slice(k, e + 1)).size > 1) {
+          const all = bases.slice(k, e + 1).flat();
+          const l = nearestSolid([0, 1, 2].map(ch => all.reduce((a, v) => a + v[ch], 0) / all.length));
+          for (let j = k; j <= e; j++) kinds[j] = l;
+        }
+        k = e;
       }
       // The arrow in the middle of an exit can tint one cell (blue → sky): smooth it out.
       for (let k = 1; k + 1 < n; k++)
