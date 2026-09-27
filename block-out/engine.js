@@ -158,7 +158,28 @@ const Engine = (() => {
     }
   }
 
-  return { solve, movable };
+  // Cells the piece passes through to reach (r, c), start and end included.
+  function path(level, st, pieceId, r, c) {
+    const p = st.pieces.find(x => x.id === pieceId);
+    const g = grid(level, st.pieces);
+    const prev = new Map([[p.r + ',' + p.c, null]]);
+    const q = [[p.r, p.c]];
+    while (q.length) {
+      const [y, x] = q.shift();
+      if (y === r && x === c) break;
+      for (const [dy, dx] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const k = (y + dy) + ',' + (x + dx);
+        if (prev.has(k) || !fits(level, g, p, y + dy, x + dx)) continue;
+        prev.set(k, [y, x]);
+        q.push([y + dy, x + dx]);
+      }
+    }
+    const out = [];
+    for (let cur = [r, c]; cur; cur = prev.get(cur[0] + ',' + cur[1])) out.unshift(cur);
+    return out;
+  }
+
+  return { solve, movable, path };
 })();
 
 if (typeof module !== 'undefined') module.exports = Engine;

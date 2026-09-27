@@ -191,7 +191,7 @@ const nextId = list => list.reduce((m, x) => Math.max(m, x.id), 0) + 1;
 function changed() { save(); render(); inspector(); }
 
 $('board').addEventListener('pointerdown', e => {
-  if (sol) return;
+  if (sol) { stopPlay(); stepForward(); return; }
   const h = locate(e);
   if (tool === 'select' || tool === 'erase') {
     const p = h.inside ? pieceAt(h.r, h.c) : null;
@@ -379,20 +379,21 @@ $('solve').addEventListener('click', () => {
 
 function openSolution() {
   $('solution').hidden = false;
+  $('player').hidden = false;
   ['tools', 'chips', 'inspector'].forEach(id => $(id).hidden = true);
   document.querySelector('#editor .size-row').hidden = true;
   const ol = $('steps');
   ol.innerHTML = '';
   sol.steps.forEach((s, i) => {
     const li = el('li'); li.textContent = describe(s);
-    li.addEventListener('click', () => goStep(i));
+    li.addEventListener('click', () => { stopPlay(); goStep(i); });
     ol.appendChild(li);
   });
   const end = el('li'); end.textContent = sol.ok ? 'Done' : 'Stuck here';
-  end.addEventListener('click', () => goStep(sol.steps.length));
+  end.addEventListener('click', () => { stopPlay(); goStep(sol.steps.length); });
   ol.appendChild(end);
   goStep(0);
-  $('solution').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  $('board-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function goStep(i) {
@@ -404,32 +405,116 @@ function goStep(i) {
 }
 
 function closeSolution() {
+  stopPlay();
   sol = null;
   $('solution').hidden = true;
+  $('player').hidden = true;
   ['tools', 'chips'].forEach(id => $(id).hidden = false);
   document.querySelector('#editor .size-row').hidden = false;
   render(); inspector();
 }
 
-$('prev').addEventListener('click', () => goStep(stepIdx - 1));
-$('next').addEventListener('click', () => goStep(stepIdx + 1));
+// ── Playback ───────────────────────────────────────────────
+let playing = false, animating = false;
+
+function stepForward() {
+  if (animating || !sol || stepIdx >= sol.steps.length) return Promise.resolve(false);
+  const s = sol.steps[stepIdx];
+  const mover = document.querySelector('.piece.moving');
+  const p = s.before.pieces.find(x => x.id === s.pieceId);
+  const pts = Engine.path(level, s.before, s.pieceId, s.r, s.c);
+  if (s.kind === 'exit') {
+    const gt = s.before.gates.find(x => x.id === s.gateId);
+    pts.push(gt.side === 'L' ? [s.r, -p.w] : gt.side === 'R' ? [s.r, level.W]
+           : gt.side === 'T' ? [-p.h, s.c] : [level.H, s.c]);
+  }
+  // Keep only the corners of the path so the piece glides in straight lines.
+  const corners = pts.filter((q, i) => i === 0 || i === pts.length - 1 ||
+    (pts[i - 1][0] - q[0]) !== (q[0] - pts[i + 1][0]) || (pts[i - 1][1] - q[1]) !== (q[1] - pts[i + 1][1]));
+  const dist = [0];
+  for (let i = 1; i < corners.length; i++)
+    dist.push(dist[i - 1] + Math.abs(corners[i][0] - corners[i - 1][0]) + Math.abs(corners[i][1] - corners[i - 1][1]));
+  const total = dist[dist.length - 1] || 1;
+  const { cs, g } = metrics();
+  const frames = corners.map(([r, c], i) => ({
+    left: (g + c * cs + 2) + 'px', top: (g + r * cs + 2) + 'px', offset: dist[i] / total,
+    opacity: s.kind === 'exit' && i === corners.length - 1 ? 0 : 1,
+  }));
+  document.querySelectorAll('.ghost').forEach(x => x.remove());
+  animating = true;
+  const anim = mover.animate(frames, { duration: Math.max(300, total * 140), easing: 'ease-in-out', fill: 'forwards' });
+  return anim.finished.then(() => { animating = false; goStep(stepIdx + 1); return true; },
+                            () => { animating = false; return false; });
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function play() {
+  if (playing) { stopPlay(); return; }
+  if (stepIdx >= sol.steps.length) goStep(0);
+  playing = true;
+  $('play').textContent = '⏸ Pause';
+  while (playing && sol && stepIdx < sol.steps.length) {
+    await sleep(450);
+    if (!playing) break;
+    await stepForward();
+  }
+  stopPlay();
+}
+function stopPlay() {
+  playing = false;
+  $('play').textContent = '▶ Play';
+}
+
+$('play').addEventListener('click', play);
+$('restart').addEventListener('click', () => { stopPlay(); if (!animating) goStep(0); });
+$('prev').addEventListener('click', () => { stopPlay(); if (!animating) goStep(stepIdx - 1); });
+$('next').addEventListener('click', () => { stopPlay(); stepForward(); });
+document.addEventListener('keydown', e => {
+  if (!sol || e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight') { stopPlay(); stepForward(); }
+  else if (e.key === 'ArrowLeft') { stopPlay(); if (!animating) goStep(stepIdx - 1); }
+  else if (e.key === ' ') { e.preventDefault(); play(); }
+});
 $('edit').addEventListener('click', () => { closeSolution(); status(''); });
 
 // ── Screenshot import ──────────────────────────────────────
 let impRect = null, impDrag = null;
 const img = $('imp-img'), stage = $('imp-stage'), box = $('imp-box');
 
-$('file').addEventListener('change', e => {
-  const f = e.target.files[0];
-  e.target.value = '';
-  if (!f) return;
-  img.src = URL.createObjectURL(f);
+function openImport(blob) {
+  img.src = URL.createObjectURL(blob);
   impRect = null; box.hidden = true; $('imp-go').disabled = true;
   const last = (() => { try { return JSON.parse(localStorage.getItem('blockout_import_size')); } catch { return null; } })() || [7, 10];
   $('imp-w').value = last[0]; $('imp-h').value = last[1];
   closeSolution();
   $('import').hidden = false; $('editor').hidden = true;
   status('');
+  $('import').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+$('file').addEventListener('change', e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (f) openImport(f);
+});
+
+$('paste').addEventListener('click', async () => {
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      const type = item.types.find(t => t.startsWith('image/'));
+      if (type) { openImport(await item.getType(type)); return; }
+    }
+    status('No image on the clipboard. Copy a screenshot first.', 'err');
+  } catch {
+    status('This browser blocked clipboard access. Press Ctrl/Cmd+V, or use 📷 Screenshot.', 'err');
+  }
+});
+
+document.addEventListener('paste', e => {
+  const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+  if (!item) return;
+  e.preventDefault();
+  openImport(item.getAsFile());
 });
 
 function drawBox() {

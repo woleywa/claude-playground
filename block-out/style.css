@@ -109,9 +109,12 @@ input[type=number] {
 #status.ok { color: var(--ok); font-weight: 600; }
 #status.err { color: var(--err); }
 
-/* Solution */
-.sol-head { display: flex; align-items: center; gap: 10px; }
-#step-text { flex: 1; text-align: center; font-size: 0.9rem; font-weight: 600; }
+/* Player */
+#player { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; max-width: 560px; margin-top: 10px; }
+#step-text { text-align: center; font-size: 0.95rem; font-weight: 700; min-height: 2.6em; }
+.player-btns { display: flex; gap: 8px; }
+.player-btns .btn { font-size: 1rem; padding: 10px 16px; }
+.player-hint { font-size: 0.75rem; color: var(--dim); }
 #steps { margin: 10px 0 10px 22px; font-size: 0.82rem; color: var(--dim); display: flex; flex-direction: column; gap: 4px; }
 #steps li { cursor: pointer; }
 #steps li.on { color: var(--text); font-weight: 600; }
