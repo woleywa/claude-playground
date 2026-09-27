@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Block Out Solver</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
   <header>
@@ -82,12 +82,12 @@
   <details class="panel help">
     <summary>How it works</summary>
     <p><b>Screenshot:</b> pick the image, or copy it and tap 📋 Paste (Ctrl/Cmd+V on a computer). The board is found automatically and shown on your screenshot as a grid; tap <i>Use this board</i> or drag a new box. Colours, piece shapes, walls, tracks, keys, locks, layered pieces, ice, crates and exits are read automatically. <b>Numbers aren't read</b>: tap each ice block, crate, lock and frozen exit (Select tool) and type its number. <i>Wrong board? Adjust</i> brings the preview back.</p>
-    <p><b>Rules:</b> drag a piece anywhere through empty space; it leaves through an exit of its own colour that is at least as wide as the piece. Each piece that leaves counts down every ice block by one; every move counts down the frozen exits. A piece with a key opens the lock of its own colour when it leaves. A layered piece leaves its core behind when the outer colour exits. A track (hollow outlined cell) can only be crossed by pieces of its colour — draw one with the Track tool and a colour. Crates open like ice; what's inside only shows once they do.</p>
+    <p><b>Rules:</b> drag a piece anywhere through empty space; it leaves through an exit of its own colour that is at least as wide as the piece. Each piece that leaves counts down every ice block, crate and frozen exit by one. A piece with a key opens the lock of its own colour when it leaves. A layered piece leaves its core behind when the outer colour exits. A track (hollow outlined cell) can only be crossed by pieces of its colour — draw one with the Track tool and a colour. Crates open like ice; what's inside only shows once they do.</p>
     <p><b>Unknown colours (?)</b>: pieces still under ice and frozen exits. The solver plays as far as it can; do those moves, then import a new screenshot once the colours show.</p>
   </details>
 
-  <script src="engine.js"></script>
-  <script src="detect.js"></script>
-  <script src="app.js"></script>
+  <script src="engine.js?v=10"></script>
+  <script src="detect.js?v=10"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

@@ -10,6 +10,7 @@ Vanilla HTML + CSS + JS, no build step, no dependencies. Hosted on GitHub Pages 
 | `style.css` | Styles |
 | `engine.js` | Rules + solver (pure, also loadable in Node via `require`) |
 | `detect.js` | Screenshot → level: `locate()` finds the grid automatically, `run()` reads cells, walls, pieces, exits |
+| `worker.js` | Runs `Engine.solve` in a Web Worker (progress messages; main-thread fallback) |
 | `app.js` | Editor, screenshot import UI, solution playback, presets, `localStorage` persistence |
 
 ## Game rules (confirmed by Wolfgang)
@@ -18,7 +19,8 @@ Vanilla HTML + CSS + JS, no build step, no dependencies. Hosted on GitHub Pages 
 - A piece can be dragged anywhere through empty cells.
 - A piece leaves through an exit of its own colour on the edge it touches, if the piece's span fits inside the exit.
 - Ice blocks count down **once per piece that leaves** (option: per cell); at 0 the piece underneath is free.
-- Frozen exits (white numbered tiles) count down **once per move** (every drag).
+- Frozen exits (white numbered tiles) count down **once per piece that leaves** (confirmed on Level 207:
+  start counters 4/7 → 1 after six pieces left). Their colour is unknown until they thaw.
 - A piece with a key opens the lock of its **own colour** when it leaves.
 - Layered piece (`inner`): the outer colour leaves through its exit; the core piece stays where it was.
 - Tracks (`level.tracks` = `[r, c, colour]`, hollow outlined cells): only pieces of that colour may cross.
@@ -30,9 +32,19 @@ Vanilla HTML + CSS + JS, no build step, no dependencies. Hosted on GitHub Pages 
 ## Solver
 
 Leaving only ever helps (frees space, ticks counters, opens locks) and drags are reversible, so the solver
-greedily takes any available exit; when none, BFS (≤3 repositionings) for moves that unblock one; when still
-stuck, it shuffles a piece to thaw the next frozen exit. It stops as soon as a thawed piece/exit has an
-unknown colour — the user plays the steps and imports a new screenshot.
+takes any available exit. When none, `findUnblock` searches for drags that let one piece out, in stages:
+
+1. BFS moving only pieces within 1 cell of the target's cheapest route out (`blockers()`: Dijkstra where
+   passing another movable piece's cell costs 1).
+2. "Park": BFS in the target's compartment (the area reachable without crossing tracks) until the target
+   sits fully on tracks of its colour, where no other piece can interfere; the next round continues from there.
+   (Level 207's 7th exit needs a ~50-drag shuffle of the top area to get a yellow bar onto its track.)
+3. BFS within 2 cells, then guided best-first (g + 3·blockers) and full BFS over all pieces.
+
+`fastSearch` is the workhorse: per-anchor footprints precomputed, identical-looking pieces interchangeable
+(positions compared as sorted sets per group), states stored flat in typed arrays and deduped by a 64-bit
+hash, so ~1.5M states fit in phone memory. The solver stops when a thawed exit or uncovered piece has an
+unknown colour: the user plays the moves and imports a new screenshot.
 
 ## Screenshot detection
 
@@ -64,7 +76,7 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
 - "Small demo" preset → ✓ Solved: 5 steps.
 - "Level 198" preset → 10 steps, then stuck waiting for 3 thawed exit colours.
 - "Level 204" preset → 5 wait moves, then stuck waiting for the thawed right exit's colour.
-- Level 207 screenshot → 7×9, 18 pieces, 4 exits, wall column, 2 batteries, 1 rocket; solve = 1 thaw move,
-  then "take a new screenshot" (3 frozen exits thaw with unknown colours).
-- "Level 205" preset → 14 steps (yellow pieces use the tracks), then waits for the thawed top exit.
+- Level 207 start screenshot (counters 4/7/7/7, crate 7) → 24 pieces, 5 exits; solve ≈ 20 s → 107 moves,
+  6 out, then "take a new screenshot" (top-left exit thawed). With that exit set to purple: 75 moves, 8 out.
+- "Level 205" preset (top exit 10) → 10 pieces out, then the top exit thaws with an unknown colour.
 - Importing the Level 198 / 204 / 205 screenshots: 7×10 (31 pieces, 11 exits) / 7×10 (14, 5) / 7×8 (14, 4 + 24 tracks).

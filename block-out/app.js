@@ -524,7 +524,7 @@ function describe(s) {
     const gt = s.before.gates.find(x => x.id === s.gateId);
     return `${name} → out the ${SIDE[gt.side]} exit` + (p.inner ? ` (the ${NAMES[p.inner].toLowerCase()} core stays)` : '');
   }
-  return `Move ${name} → row ${s.r + 1}, col ${s.c + 1}` + (s.wait ? ' (any move works: this just thaws an exit)' : '');
+  return `Move ${name} → row ${s.r + 1}, col ${s.c + 1}`;
 }
 
 // What the player must look at before the solver can go on (colours still hidden), or ''.
@@ -550,24 +550,45 @@ function stuckReason(st) {
   return 'No further move found. Check colours, exits and numbers.';
 }
 
+let worker = null;
+
+function showResult(res, ms) {
+  const exits = res.steps.filter(s => s.kind === 'exit').length;
+  if (!res.steps.length) { status('No piece can get out yet. ' + stuckReason(res.final), 'err'); return; }
+  sol = res; stepIdx = 0;
+  const hidden = res.final.pieces.length;
+  const look = needsLook(res.final);
+  if (res.ok && !hidden) status(`✓ Solved: ${res.steps.length} moves (${(ms / 1000).toFixed(1)} s).`, 'ok');
+  else if (res.ok) status(`All known pieces cleared in ${res.steps.length} moves. ${hidden} hidden piece${hidden > 1 ? 's' : ''} left: take a new screenshot once they show.`, 'ok');
+  else if (look) status(`Play ${res.steps.length === 1 ? 'this move' : `these ${res.steps.length} moves`}` +
+    (exits ? ` (${exits} piece${exits === 1 ? '' : 's'} out)` : '') + `, then take a new screenshot: ${look}`, 'ok');
+  else status(`${res.steps.length} moves (${exits} piece${exits === 1 ? '' : 's'} out), then no way further was found. ${stuckReason(res.final)}`, 'err');
+  openSolution();
+}
+
+function stopSolving() {
+  if (worker) { worker.terminate(); worker = null; }
+  $('solve').textContent = 'Solve ▶';
+}
+
 $('solve').addEventListener('click', () => {
+  if (worker) { stopSolving(); status('Stopped.', ''); return; }
   if (!level.pieces.length) { status('The board is empty.', 'err'); return; }
+  const t0 = performance.now();
   status('Solving…');
-  setTimeout(() => {
-    const t0 = performance.now();
-    const res = Engine.solve(level);
-    const ms = Math.round(performance.now() - t0);
-    const exits = res.steps.filter(s => s.kind === 'exit').length;
-    if (!res.steps.length) { status('No piece can reach a matching exit yet. ' + stuckReason(res.final), 'err'); return; }
-    sol = res; stepIdx = 0;
-    const hidden = res.final.pieces.length;
-    if (res.ok && !hidden) status(`✓ Solved: ${res.steps.length} steps (${ms} ms).`, 'ok');
-    else if (res.ok) status(`All known pieces cleared in ${res.steps.length} steps. ${hidden} hidden piece${hidden > 1 ? 's' : ''} left: import a new screenshot once they show.`, 'ok');
-    else if (needsLook(res.final)) status(`Play ${res.steps.length === 1 ? 'this move' : `these ${res.steps.length} moves`}` +
-      (exits ? ` (${exits} piece${exits === 1 ? '' : 's'} out)` : '') + `, then take a new screenshot: ${needsLook(res.final)}`, 'ok');
-    else status(`${res.steps.length} steps (${exits} piece${exits === 1 ? '' : 's'} out), then stuck. ${stuckReason(res.final)}`, 'err');
-    openSolution();
-  }, 20);
+  try {
+    worker = new Worker('worker.js?v=10');
+  } catch {
+    setTimeout(() => showResult(Engine.solve(level, 20000), performance.now() - t0), 20);
+    return;
+  }
+  $('solve').textContent = '■ Stop';
+  worker.onmessage = e => {
+    if (e.data.progress) status(`Solving… ${Math.round(e.data.progress / 1000)}k positions checked (${Math.round((performance.now() - t0) / 1000)} s). Hard levels can take a minute.`);
+    if (e.data.done) { const res = e.data.done; stopSolving(); showResult(res, performance.now() - t0); }
+  };
+  worker.onerror = () => { stopSolving(); status('Solving… (fallback)'); setTimeout(() => showResult(Engine.solve(level, 20000), performance.now() - t0), 20); };
+  worker.postMessage({ level, timeMs: 90000 });
 });
 
 function openSolution() {

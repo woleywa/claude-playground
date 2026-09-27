@@ -5,8 +5,7 @@
 // gate:  { id, side: 'L'|'R'|'T'|'B', start, len, color, frozen }
 // level: { W, H, walls: [[r, c], …], tracks: [[r, c, color], …], pieces, gates, tickPerCell }
 //   a track cell only lets pieces of its colour move across it
-// Ice counts down once per piece that leaves (or per cell with tickPerCell);
-// frozen exits count down once per move (every drag, including one that leaves).
+// Ice and frozen exits count down once per piece that leaves (ice: per cell with tickPerCell).
 const Engine = (() => {
   const clone = s => JSON.parse(JSON.stringify(s));
   const movable = p => !p.ice && !p.lock && p.color !== '?';
@@ -116,55 +115,343 @@ const Engine = (() => {
       if (q.ice) q.ice = Math.max(0, q.ice - tick);
       if (p.key && q.lock && q.color === p.color) q.lock--;
     }
-    thaw(st.gates);
+    st.gates = st.gates.map(gt => gt.frozen ? { ...gt, frozen: gt.frozen - 1 } : gt);
   }
 
-  const thaw = gates => gates.forEach(gt => { if (gt.frozen) gt.frozen--; });
-  const moveTo = (st, id, r, c) => {
-    const s2 = { pieces: st.pieces.map(x => x.id === id ? { ...x, r, c } : x), gates: clone(st.gates) };
-    thaw(s2.gates);
-    return s2;
-  };
+  const moveTo = (st, id, r, c) => ({ pieces: st.pieces.map(x => x.id === id ? { ...x, r, c } : x), gates: st.gates });
 
-  // No piece can exit directly: find the fewest repositionings that let one exit.
-  function findUnblock(level, st, deadline) {
-    const key = s => s.pieces.map(p => p.r + ',' + p.c).join('|') + '#' + s.gates.map(g => g.frozen).join(',');
-    const seen = new Set([key(st)]);
-    let frontier = [{ st, moves: [] }];
-    for (let depth = 0; depth < 3 && frontier.length; depth++) {
-      const next = [];
-      for (const node of frontier) {
-        const g = grid(level, node.st.pieces);
-        for (const p of node.st.pieces) {
-          if (!movable(p)) continue;
-          for (const [r, c] of reachable(level, g, p)) {
-            if (r === p.r && c === p.c) continue;
-            if (performance.now() > deadline) return null;
-            const s2 = moveTo(node.st, p.id, r, c);
-            const k = key(s2);
-            if (seen.has(k)) continue;
-            seen.add(k);
-            const moves = [...node.moves, { pieceId: p.id, fromR: p.r, fromC: p.c, r, c }];
-            if (findExit(level, s2)) return { st: s2, moves };
-            next.push({ st: s2, moves });
-          }
+  // How blocked piece T is: the cheapest route to a position from which it can leave through a
+  // thawed exit of its colour, where every cell of another movable piece it has to pass costs 1.
+  // Walls, iced/locked pieces and tracks of another colour can't be passed at all.
+  function blockers(level, st, T) {
+    const W = level.W, H = level.H, g = grid(level, st.pieces), tr = trackMap(level);
+    const gates = st.gates.filter(gt => !gt.frozen && gt.color === T.color);
+    const none = { cost: Infinity, ids: new Set(), cells: new Set() };
+    if (!gates.length) return none;
+    const byId = new Map(st.pieces.map(p => [p.id, p]));
+    const cell = (y, x) => {
+      if (y < 0 || x < 0 || y >= H || x >= W) return Infinity;
+      const v = g[y * W + x], t = tr.get(y * W + x);
+      if (v === -2 || (t && t !== T.color)) return Infinity;
+      if (v === -1 || v === T.id) return 0;
+      return movable(byId.get(v)) ? 1 : Infinity;
+    };
+    const at = (r, c) => {
+      let s = 0;
+      for (const [y, x] of cellsOf(T, r, c)) { const k = cell(y, x); if (k === Infinity) return Infinity; s += k; }
+      return s;
+    };
+    const idsAt = (cells, into) => cells.forEach(([y, x]) => { const v = g[y * W + x]; if (v >= 0 && v !== T.id) into.add(v); });
+    const lane = (r, c, want) => {
+      const cells = cellsOf(T, r, c);
+      let best = Infinity, bestRun = [];
+      for (const gt of gates) {
+        const across = gt.side === 'L' || gt.side === 'R' ? cells.map(q => q[0]) : cells.map(q => q[1]);
+        if (Math.min(...across) < gt.start || Math.max(...across) >= gt.start + gt.len) continue;
+        let s = 0;
+        for (const [y, x] of cells) {
+          const run = gt.side === 'L' ? [...Array(x).keys()].map(k => [y, k])
+            : gt.side === 'R' ? [...Array(W - x - 1).keys()].map(k => [y, x + 1 + k])
+            : gt.side === 'T' ? [...Array(y).keys()].map(k => [k, x])
+            : [...Array(H - y - 1).keys()].map(k => [y + 1 + k, x]);
+          for (const [yy, xx] of run) { s += cell(yy, xx); if (want) want.push([yy, xx]); }
+        }
+        if (s < best) { best = s; bestRun = want ? want.splice(0) : []; } else if (want) want.length = 0;
+      }
+      return want ? bestRun : best;
+    };
+    const dist = new Array(W * H).fill(Infinity), prev = new Int32Array(W * H).fill(-1);
+    const start = T.r * W + T.c;
+    dist[start] = 0;
+    const buckets = [[start]];
+    let best = Infinity, bestAt = -1;
+    for (let d = 0; d < buckets.length && d < best; d++) {
+      for (const i of buckets[d] || []) {
+        if (dist[i] !== d) continue;
+        const r = (i / W) | 0, c = i % W;
+        const l = lane(r, c);
+        if (d + l < best) { best = d + l; bestAt = i; }
+        for (const [dr, dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nr = r + dr, nc = c + dc;
+          if (nr < 0 || nc < 0 || nr >= H || nc >= W) continue;
+          const k = at(nr, nc);
+          if (k === Infinity || d + k >= dist[nr * W + nc]) continue;
+          dist[nr * W + nc] = d + k;
+          prev[nr * W + nc] = i;
+          (buckets[d + k] = buckets[d + k] || []).push(nr * W + nc);
         }
       }
-      frontier = next;
+    }
+    if (bestAt < 0) return none;
+    // The pieces standing on that route (and in the way out) are the ones worth moving.
+    const ids = new Set(), cells = new Set();
+    const note = list => { idsAt(list, ids); list.forEach(([y, x]) => cells.add(y * W + x)); };
+    for (let i = bestAt; i >= 0; i = prev[i]) note(cellsOf(T, (i / W) | 0, i % W));
+    note(lane((bestAt / W) | 0, bestAt % W, []));
+    return { cost: best, ids, cells };
+  }
+
+  function canExit(level, st, id) {
+    const p = st.pieces.find(x => x.id === id);
+    const g = grid(level, st.pieces);
+    for (const [r, c] of reachable(level, g, p)) if (gateFor(level, g, st.gates, p, r, c)) return true;
+    return false;
+  }
+
+  // Breadth-first search over drags of the pieces in `ids` (everything else stays put) until piece
+  // `tid` can leave. Compact: footprints are precomputed per anchor cell, and pieces that look and
+  // behave the same are interchangeable, so their positions are compared as a set.
+  function fastSearch(level, st, tid, ids, cap, deadline, progress, park, guided) {
+    const W = level.W, H = level.H, N = W * H, tr = trackMap(level);
+    const rel = st.pieces.filter(p => ids.has(p.id) && movable(p));
+    const T = rel.findIndex(p => p.id === tid);
+    if (T < 0) return null;
+    const base = new Int16Array(N).fill(-1);
+    for (const [r, c] of level.walls || []) base[r * W + c] = -2;
+    for (const p of st.pieces) if (!rel.includes(p)) for (const [r, c] of cellsOf(p)) base[r * W + c] = -3;
+    const K = rel.length;
+    const foot = rel.map(p => {
+      const arr = new Array(N).fill(null);
+      for (let a = 0; a < N; a++) {
+        const r = (a / W) | 0, c = a % W, cs = [];
+        let ok = true;
+        for (const [dr, dc] of offsets(p)) {
+          const y = r + dr, x = c + dc;
+          if (y < 0 || x < 0 || y >= H || x >= W) { ok = false; break; }
+          const i = y * W + x, t = tr.get(i);
+          if (base[i] !== -1 || (t && t !== p.color)) { ok = false; break; }
+          cs.push(i);
+        }
+        if (ok) arr[a] = cs;
+      }
+      return arr;
+    });
+    // For each anchor of the target: the lane cells that must be empty to leave through a gate.
+    const P = rel[T];
+    const lanes = new Array(N).fill(null);
+    for (let a = 0; a < N; a++) {
+      if (!foot[T][a]) continue;
+      const cells = cellsOf(P, (a / W) | 0, a % W);
+      for (const gt of st.gates) {
+        if (gt.frozen || gt.color !== P.color) continue;
+        const across = gt.side === 'L' || gt.side === 'R' ? cells.map(q => q[0]) : cells.map(q => q[1]);
+        if (Math.min(...across) < gt.start || Math.max(...across) >= gt.start + gt.len) continue;
+        const lane = [];
+        let ok = true;
+        for (const [y, x] of cells) {
+          const run = gt.side === 'L' ? [...Array(x).keys()].map(k => y * W + k)
+            : gt.side === 'R' ? [...Array(W - x - 1).keys()].map(k => y * W + x + 1 + k)
+            : gt.side === 'T' ? [...Array(y).keys()].map(k => k * W + x)
+            : [...Array(H - y - 1).keys()].map(k => (y + 1 + k) * W + x);
+          for (const i of run) {
+            const t = tr.get(i);
+            if (base[i] !== -1 || (t && t !== P.color)) ok = false;
+            lane.push(i);
+          }
+        }
+        if (ok) (lanes[a] = lanes[a] || []).push(lane);
+      }
+    }
+    const sig = rel.map((p, k) => k === T ? '#' : [p.color, p.inner || '', p.key ? 1 : 0, p.lock, p.shape ? JSON.stringify(p.shape) : p.h + 'x' + p.w].join('|'));
+    const groups = [...new Set(sig)].map(g => sig.map((s2, k) => s2 === g ? k : -1).filter(k => k >= 0));
+    // Positions are stored flat (K numbers per state) and remembered by a 64-bit hash of the
+    // canonical (per-group sorted) positions, which keeps a million+ states within phone memory.
+    const tmp = new Int32Array(K);
+    const hashOf = pos => {
+      let o = 0;
+      for (const g of groups) { const s0 = o; for (const k of g) tmp[o++] = pos[k]; tmp.subarray(s0, o).sort(); }
+      let h1 = 0x811c9dc5, h2 = 0x9747b28c;
+      for (let i = 0; i < K; i++) { h1 = Math.imul(h1 ^ tmp[i], 16777619); h2 = Math.imul(h2 ^ (tmp[i] + 0x9e37), 2246822519) ^ (h2 >>> 13); }
+      return [(h1 | 1) >>> 0, h2 >>> 0];
+    };
+    let SLOTS = 1 << 12;
+    while (SLOTS < cap * 2 && SLOTS < 1 << 22) SLOTS <<= 1;
+    const hA = new Uint32Array(SLOTS), hB = new Uint32Array(SLOTS);
+    const remember = pos => {
+      const [a, b] = hashOf(pos);
+      for (let i = a & (SLOTS - 1); ; i = (i + 1) & (SLOTS - 1)) {
+        if (hA[i] === 0) { hA[i] = a; hB[i] = b; return true; }
+        if (hA[i] === a && hB[i] === b) return false;
+      }
+    };
+    const occ = new Int16Array(N);
+    const fill = pos => { occ.set(base); for (let k = 0; k < K; k++) for (const i of foot[k][pos[k]]) occ[i] = k; };
+    const reach = (k, pos) => {
+      const seen = new Set([pos[k]]), q = [pos[k]];
+      const ok = a => { const f = foot[k][a]; if (!f) return false; for (const i of f) if (occ[i] !== -1 && occ[i] !== k) return false; return true; };
+      for (let h = 0; h < q.length; h++) {
+        const a = q[h], c = a % W;
+        for (const b of [a - W, a + W, c > 0 ? a - 1 : -1, c < W - 1 ? a + 1 : -1]) {
+          if (b < 0 || b >= N || seen.has(b) || !ok(b)) continue;
+          seen.add(b); q.push(b);
+        }
+      }
+      return q;
+    };
+    // Goal: leave through a gate, or (park) sit entirely on tracks of its colour, where no other
+    // piece can come, ready for the next stage.
+    const onTrack = a => foot[T][a] && foot[T][a].every(i => tr.get(i) === P.color);
+    const canLeave = park ? (anchors => anchors.some(onTrack))
+      : (anchors => anchors.some(a => (lanes[a] || []).some(l => l.every(i => occ[i] === -1 || occ[i] === T))));
+    // Guided mode: how many occupied cells lie on the target's cheapest way out (route + lane).
+    const hcost = () => {
+      const dist = new Int16Array(N).fill(32767), bk = [[]];
+      let best = 32767;
+      const cost = a => { let c = 0; for (const i of foot[T][a]) if (occ[i] !== -1 && occ[i] !== T) { if (occ[i] < 0) return -1; c++; } return c; };
+      const s0 = startPos[T]; dist[s0] = 0; bk[0].push(s0);
+      for (let d = 0; d < bk.length && d < best; d++)
+        for (const a of bk[d] || []) {
+          if (dist[a] !== d) continue;
+          for (const l of lanes[a] || []) { let c = 0, bad = false; for (const i of l) if (occ[i] !== -1 && occ[i] !== T) { if (occ[i] < 0) bad = true; c++; } if (!bad) best = Math.min(best, d + c); }
+          const c = a % W;
+          for (const b of [a - W, a + W, c > 0 ? a - 1 : -1, c < W - 1 ? a + 1 : -1]) {
+            if (b < 0 || b >= N || !foot[T][b]) continue;
+            const k = cost(b);
+            if (k < 0 || d + k >= dist[b]) continue;
+            dist[b] = d + k; (bk[d + k] = bk[d + k] || []).push(b);
+          }
+        }
+      return best;
+    };
+    let startPos;
+    const heapI = [], heapF = [];
+    const hpush = (i, f) => {
+      let n = heapI.length; heapI.push(i); heapF.push(f);
+      while (n > 0) { const p = (n - 1) >> 1; if (heapF[p] <= f) break; heapI[n] = heapI[p]; heapF[n] = heapF[p]; n = p; }
+      heapI[n] = i; heapF[n] = f;
+    };
+    const hpop = () => {
+      const top = heapI[0], li = heapI.pop(), lf = heapF.pop();
+      if (heapI.length) {
+        let n = 0;
+        for (;;) { let c = 2 * n + 1; if (c >= heapI.length) break; if (c + 1 < heapI.length && heapF[c + 1] < heapF[c]) c++; if (heapF[c] >= lf) break; heapI[n] = heapI[c]; heapF[n] = heapF[c]; n = c; }
+        heapI[n] = li; heapF[n] = lf;
+      }
+      return top;
+    };
+    const gOf = [];
+    const start = rel.map(p => p.r * W + p.c);
+    cap = Math.min(cap, (SLOTS * 0.6) | 0);
+    let size = 1 << 16, buf = new Int16Array(size * K), parent = new Int32Array(size), mover = new Int8Array(size), from = new Int16Array(size);
+    let count = 0;
+    const push = (pos, par, k, fr) => {
+      if (count === size) {
+        size *= 2;
+        const nb = new Int16Array(size * K); nb.set(buf); buf = nb;
+        const np = new Int32Array(size); np.set(parent); parent = np;
+        const nm = new Int8Array(size); nm.set(mover); mover = nm;
+        const nf = new Int16Array(size); nf.set(from); from = nf;
+      }
+      buf.set(pos, count * K); parent[count] = par; mover[count] = k; from[count] = fr;
+      return count++;
+    };
+    const stateAt = i => Array.from(buf.subarray(i * K, i * K + K));
+    remember(start); push(start, -1, -1, -1);
+    if (guided) { gOf[0] = 0; hpush(0, 0); }
+    for (let step = 0; guided ? heapI.length : step < count; step++) {
+      let h = guided ? hpop() : step;
+      let pos = stateAt(h);
+      fill(pos);
+      const got = reach(T, pos);
+      if (canLeave(got)) {
+        if (park && !onTrack(pos[T])) {
+          const a = got.find(onTrack);
+          h = push(pos.map((v, k) => k === T ? a : v), h, T, pos[T]);
+        }
+        const moves = [];
+        for (let i = h; parent[i] >= 0; i = parent[i]) {
+          const k = mover[i], p = rel[k], to = buf[i * K + k];
+          moves.unshift({ pieceId: p.id, fromR: (from[i] / W) | 0, fromC: from[i] % W, r: (to / W) | 0, c: to % W });
+        }
+        let s2 = st;
+        for (const mv of moves) s2 = moveTo(s2, mv.pieceId, mv.r, mv.c);
+        return { st: s2, moves };
+      }
+      for (let k = 0; k < K; k++) {
+        for (const a of reach(k, pos)) {
+          if (a === pos[k]) continue;
+          const old = pos[k];
+          pos[k] = a;
+          if (remember(pos)) {
+            const id = push(pos, h, k, old);
+            if (guided) {
+              fill(pos); startPos = pos;
+              const hv = hcost();
+              fill(pos.map((v, kk) => kk === k ? old : v));
+              gOf[id] = gOf[h] + 1;
+              if (hv < 32767) hpush(id, gOf[id] + 3 * hv);
+            }
+          }
+          pos[k] = old;
+        }
+      }
+      if (count > cap || (step & 255) === 0 && performance.now() > deadline) return null;
+      if (progress && (step & 8191) === 0) progress(count);
+    }
+    return null;
+  }
+
+  // Nothing can leave right now: find the shortest sequence of drags that lets one piece out.
+  // Breadth-first, moving only pieces near that piece's cheapest way out (the route through
+  // other pieces), widening the circle if needed. Every target gets the cheap searches first.
+  function findUnblock(level, st, deadline, progress) {
+    const W = level.W;
+    const targets = st.pieces.filter(movable).map(T => ({ id: T.id, b: blockers(level, st, T) }))
+      .filter(t => isFinite(t.b.cost)).sort((a, b) => a.b.cost - b.b.cost);
+    const key = s => s.pieces.map(p => p.r + ',' + p.c).join('|');
+    const near = (p, cells, d) => cellsOf(p).some(([y, x]) => {
+      for (const i of cells) if (Math.abs(((i / W) | 0) - y) + Math.abs(i % W - x) <= d) return true;
+      return false;
+    });
+    const bfs = (tid, ids, cap) => fastSearch(level, st, tid, ids, cap, deadline, progress);
+    const all = st.pieces.filter(movable);
+    const tr = trackMap(level);
+    // The part of the board a piece can get around in without crossing tracks (only the track's
+    // colour may): the pieces there are the ones that can matter for getting it out of there.
+    const compartment = T => {
+      const g = grid(level, st.pieces), seen = new Set(), q = [];
+      for (const [y, x] of cellsOf(T)) { seen.add(y * W + x); q.push(y * W + x); }
+      const ids = new Set([T.id]);
+      for (let h = 0; h < q.length; h++) {
+        const i = q[h], y = (i / W) | 0, x = i % W;
+        for (const [dy, dx] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const yy = y + dy, xx = x + dx, j = yy * W + xx;
+          if (yy < 0 || xx < 0 || yy >= level.H || xx >= W || seen.has(j)) continue;
+          const v = g[j];
+          if (v === -2 || tr.get(j)) continue;
+          if (v >= 0) { const p = st.pieces.find(z => z.id === v); if (!movable(p)) continue; ids.add(v); }
+          seen.add(j); q.push(j);
+        }
+      }
+      return ids;
+    };
+    const trackBound = t => {
+      const T = st.pieces.find(p => p.id === t.id);
+      return [...t.b.cells].some(i => tr.get(i) === T.color) && !cellsOf(T).every(([y, x]) => tr.get(y * W + x) === T.color);
+    };
+    const stages = [
+      ...targets.map(t => () => bfs(t.id, new Set(all.filter(p => p.id === t.id || near(p, t.b.cells, 1)).map(p => p.id)), 100000)),
+      ...targets.filter(trackBound).map(t => () => fastSearch(level, st, t.id, compartment(st.pieces.find(p => p.id === t.id)), 1500000, deadline, progress, true)),
+      ...targets.map(t => () => bfs(t.id, new Set(all.filter(p => p.id === t.id || near(p, t.b.cells, 2)).map(p => p.id)), 400000)),
+      ...targets.map(t => () => fastSearch(level, st, t.id, new Set(all.map(p => p.id)), 600000, deadline, progress, false, true)),
+      ...targets.map(t => () => bfs(t.id, new Set(all.map(p => p.id)), 800000)),
+    ];
+    for (const stage of stages) {
+      const res = stage();
+      if (res) return res;
+      if (performance.now() > deadline) return null;
     }
     return null;
   }
 
   // Exits only ever help (free space, tick counters, open locks) and drags are
   // reversible, so exiting whatever can exit next never blocks a solution.
-  function solve(level, timeMs = 4000) {
+  function solve(level, timeMs = 8000, progress) {
     const deadline = performance.now() + timeMs;
     let st = { pieces: clone(level.pieces), gates: clone(level.gates) };
     const steps = [];
     while (true) {
-      if (!st.pieces.some(p => p.color !== '?')) {
-        return { ok: true, steps, final: st };
-      }
+      if (!st.pieces.some(p => p.color !== '?')) return { ok: true, steps, final: st };
       const ex = findExit(level, st);
       if (ex) {
         const p = st.pieces.find(x => x.id === ex.pieceId);
@@ -172,28 +459,11 @@ const Engine = (() => {
         applyExit(level, st, p.id, ex.r, ex.c);
         continue;
       }
-      const un = findUnblock(level, st, deadline);
-      if (un) {
-        for (const mv of un.moves) {
-          steps.push({ kind: 'move', before: clone(st), ...mv });
-          st = moveTo(st, mv.pieceId, mv.r, mv.c);
-        }
-        continue;
-      }
-      // A thawed exit or piece with an unknown colour: the player has to look before going on.
-      if (st.gates.some(g => !g.frozen && g.color === '?') || st.pieces.some(p => !p.ice && p.color === '?'))
-        return { ok: false, steps, final: st };
-      // Still stuck: spend moves shuffling one piece back and forth until the next exit thaws.
-      const wait = Math.min(...st.gates.filter(g => g.frozen).map(g => g.frozen));
-      const g = grid(level, st.pieces);
-      const p = st.pieces.find(x => movable(x) && reachable(level, g, x).length > 1);
-      if (!isFinite(wait) || !p) return { ok: false, steps, final: st };
-      const [ar, ac] = reachable(level, g, p)[1];
-      for (let i = 0; i < wait; i++) {
-        const cur = st.pieces.find(x => x.id === p.id);
-        const [r, c] = i % 2 ? [p.r, p.c] : [ar, ac];
-        steps.push({ kind: 'move', wait: true, before: clone(st), pieceId: p.id, fromR: cur.r, fromC: cur.c, r, c });
-        st = moveTo(st, p.id, r, c);
+      const un = findUnblock(level, st, deadline, progress);
+      if (!un) return { ok: false, steps, final: st };
+      for (const mv of un.moves) {
+        steps.push({ kind: 'move', before: clone(st), ...mv });
+        st = moveTo(st, mv.pieceId, mv.r, mv.c);
       }
     }
   }
@@ -219,7 +489,7 @@ const Engine = (() => {
     return out;
   }
 
-  return { solve, movable, path, cellsOf };
+  return { solve, movable, path, cellsOf, fastSearch };
 })();
 
 if (typeof module !== 'undefined') module.exports = Engine;
