@@ -221,7 +221,11 @@ const Detect = (() => {
       // Let each line find its seam within a few % of a cell, so small edge errors don't matter.
       const win = [];
       for (let o = -Math.max(2, Math.round(0.05 * cs)); o <= Math.max(2, Math.round(0.05 * cs)); o++) win.push(o);
-      const valley = (lineAt, sideA, sideB) => {
+      // Inside a crate (or the frame) there are no seams at all; such samples say nothing about
+      // the lattice, and counting them favours a coarse one whose lines fall on crate edges.
+      const plank = (x, y) => ['crate', 'frame'].includes(classify(at(x, y, 1)));
+      const valley = (lineAt, sideA, sideB, pa, pb) => {
+        if (pa && plank(...pa) && plank(...pb)) return;
         const line = Math.min(...win.map(lineAt));
         vals.push(Math.max(0, 1 - line / Math.max(1, Math.min(sideA, sideB))));
       };
@@ -229,15 +233,15 @@ const Detect = (() => {
         for (let j = 0; j < m; j++)
           for (const t of [0.3, 0.5, 0.7]) {
             const x = gx0 + k * cs, y = gy0 + (j + t) * cs;
-            valley(o => lum(px(x + o, y)), lum(px(x - 0.18 * cs, y)), lum(px(x + 0.18 * cs, y)));
+            valley(o => lum(px(x + o, y)), lum(px(x - 0.18 * cs, y)), lum(px(x + 0.18 * cs, y)), [x - 0.25 * cs, y], [x + 0.25 * cs, y]);
           }
       for (let j = 1; j < m; j++)
         for (let k = 0; k < n; k++)
           for (const t of [0.3, 0.5, 0.7]) {
             const x = gx0 + (k + t) * cs, y = gy0 + j * cs;
-            valley(o => lum(px(x, y + o)), lum(px(x, y - 0.18 * cs)), lum(px(x, y + 0.18 * cs)));
+            valley(o => lum(px(x, y + o)), lum(px(x, y - 0.18 * cs)), lum(px(x, y + 0.18 * cs)), [x, y - 0.25 * cs], [x, y + 0.25 * cs]);
           }
-      const score = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const score = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
       // With the right lattice each cell is mostly one colour; a wrong one cuts across pieces.
       let purity = 0;
       for (let j = 0; j < m; j++)
@@ -252,7 +256,7 @@ const Detect = (() => {
         }
       purity /= n * m;
       // Cells are square, so the right count also makes the rows come out (nearly) whole.
-      cands.push({ n, m, score, purity, fit: score * purity * purity * sq, whole, rect: { x: gx0, y: gy0, w: n * cs, h: m * cs } });
+      cands.push({ n, m, cs, score, purity, fit: score * purity * purity * sq, whole, rect: { x: gx0, y: gy0, w: n * cs, h: m * cs } });
     }
     if (!cands.length) return null;
     // Keep the best alignment for each cell count.
@@ -260,12 +264,48 @@ const Detect = (() => {
     for (const c of cands) if (!bestOf.has(c.n) || c.fit > bestOf.get(c.n).fit) bestOf.set(c.n, c);
     cands.length = 0; cands.push(...bestOf.values());
     const base = cands.reduce((a, b) => b.fit > a.fit ? b : a);
+    // Seam strength along a set of lines of lattice c: 'extra' = the lines a lattice of half the
+    // count doesn't have, 'mid' = the lines through the middle of c's cells (never seams).
+    const lineScore = (c, kind) => {
+      const { n, m, cs } = c, x0 = c.rect.x, y0 = c.rect.y, vals = [];
+      const w = Math.max(2, Math.round(0.05 * cs));
+      const plank = (x, y) => ['crate', 'frame'].includes(classify(at(x, y, 1)));
+      const one = (x, y, nx, ny) => {
+        if (plank(x - nx * 0.25 * cs, y - ny * 0.25 * cs) && plank(x + nx * 0.25 * cs, y + ny * 0.25 * cs)) return;
+        let line = Infinity;
+        for (let o = -w; o <= w; o++) line = Math.min(line, lum(px(x + nx * o, y + ny * o)));
+        const side = Math.min(lum(px(x - nx * 0.18 * cs, y - ny * 0.18 * cs)), lum(px(x + nx * 0.18 * cs, y + ny * 0.18 * cs)));
+        vals.push(Math.max(0, 1 - line / Math.max(1, side)));
+      };
+      const xs = kind === 'extra' ? [...Array(n).keys()].filter(k => k % 2).map(k => x0 + k * cs) : [...Array(n).keys()].map(k => x0 + (k + 0.5) * cs);
+      const ys = kind === 'extra' ? [...Array(m).keys()].filter(j => j % 2).map(j => y0 + j * cs) : [...Array(m).keys()].map(j => y0 + (j + 0.5) * cs);
+      for (const x of xs) for (let j = 0; j < m; j++) for (const t of [0.3, 0.7]) one(x, y0 + (j + t) * cs, 1, 0);
+      for (const y of ys) for (let k = 0; k < n; k++) for (const t of [0.3, 0.7]) one(x0 + (k + t) * cs, y, 0, 1);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    };
+    // Studs: each true cell shows 2×2 studs a quarter cell from its centre, so on the right lattice
+    // those points differ strongly from the centre; on one twice too coarse they don't.
+    const studScore = c => {
+      const { n, m, cs } = c, x0 = c.rect.x, y0 = c.rect.y, rr = Math.max(1, Math.round(cs * 0.05));
+      let sum = 0, k = 0;
+      for (let j = 0; j < m; j++) for (let i = 0; i < n; i++) {
+        const cx = x0 + (i + 0.5) * cs, cy = y0 + (j + 0.5) * cs;
+        if (!SOLID.has(classify(at(cx, cy, 1)))) continue;
+        const st = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([a, b]) => lum(at(cx + a * 0.25 * cs, cy + b * 0.25 * cs, rr))).reduce((a, b) => a + b, 0) / 4;
+        sum += st - lum(at(cx, cy, rr)); k++;
+      }
+      return k ? sum / k : 0;
+    };
+    // Twice the count wins when its extra lines show clearly more seam than its cells' middles, or
+    // its cells show the stud pattern much more strongly.
+    const doubled = c => c.n === 2 * base.n && c.m === 2 * base.m && c.score >= 0.4 * base.score
+      && (lineScore(c, 'extra') >= 1.4 * lineScore(c, 'mid') + 0.01 || studScore(c) <= studScore(base) - 8);
     // A lattice with twice the columns contains every true line too; only prefer it when its
     // seams score about as well, and never prefer an unrelated count.
     // A big crate has no seams inside, which favours too coarse a lattice; that one cuts across
     // pieces, though, so a finer one that is clearly purer also wins.
     const pick = cands.filter(c => c.n % base.n === 0 && (c.score >= 0.8 * base.score
-      || (base.purity < 0.8 && c.purity >= base.purity + 0.07 && c.score >= 0.6 * base.score))).sort((a, b) => b.n - a.n)[0];
+      || (base.purity < 0.8 && c.purity >= base.purity + 0.07 && c.score >= 0.6 * base.score) || (c !== base && doubled(c)))).sort((a, b) => b.n - a.n)[0];
 
     return { rect: mirX || mirY || !pick.whole ? pick.rect : { x: gx0, y: gy0, w: Wg, h: Hg }, W: pick.n, H: pick.m };
   }
@@ -361,6 +401,10 @@ const Detect = (() => {
         // An icon (battery) can average out to the frame colour; the piece still shows all round it.
         const cv = vote(corners);
         if (['frame', 'crate'].includes(label) && SOLID.has(cv) && !['yellow', 'orange', 'red'].includes(cv) && top.length && top[0][0] === cv && top[0][1] >= 15) label = cv;
+        else if (['frame', 'crate'].includes(label) && top.length && top[0][1] >= 20 && !['yellow', 'orange', 'red'].includes(top[0][0])) {
+          const fam = corners.filter(k => k === top[0][0] || (PARTNER[top[0][0]] || []).includes(k));
+          if (fam.length >= 2) label = vote(fam);
+        }
         // A big icon (double rocket) can cover the corners; the colour covering most of the cell wins.
         if (m.dist > 45 && !goldHit && top.length && top[0][1] >= 20 && SOLID.has(label) && label !== top[0][0]) label = top[0][0];
         // The core runs through the piece's middle, so it also shows at the cell's centre.
@@ -737,7 +781,9 @@ const Detect = (() => {
         const solid = raw.filter((_, i) => SOLID.has(pts[i])).sort((a, b) => lumOf(a) - lumOf(b));
         const base = solid.slice(0, Math.max(1, Math.ceil(solid.length * 0.6)));
         const l = pts.filter(x => x === 'frozen').length >= 3 ? 'frozen'
-          : solid.length ? nearestSolid([0, 1, 2].map(ch => base.reduce((a, v) => a + v[ch], 0) / base.length)) : vote(pts);
+          // An exit fills its strip of frame; coloured bits over background are debris flying past
+          // (Level 219).
+          : solid.length && pts.filter(x => ['empty', 'track', 'frame'].includes(x)).length < 4 ? nearestSolid([0, 1, 2].map(ch => base.reduce((a, v) => a + v[ch], 0) / base.length)) : vote(pts);
         kinds.push(['frame', 'empty', 'ice', 'crate', 'white', 'track'].includes(l) ? null : l);
         bases.push(base);
       }
@@ -870,6 +916,45 @@ const Detect = (() => {
       const n = readNumber(img, rect.x + c * cw, rect.y + r * ch, rect.x + (c + w) * cw, rect.y + (r + h) * ch, 'g');
       if (n) { gt.frozen = n; gt.read = true; }
     }
+    // Exit strips on an inner edge (Level 219): where the board narrows, an exit bar sits just past
+    // the last open cell, filling only the near part of the next cell; the far part is background.
+    {
+      const pieceAt = (r, c) => pieces.find(p => (p.shape ? p.shape.map(([a, b]) => [p.r + a, p.c + b]) : [...Array(p.h * p.w).keys()].map(k => [p.r + Math.floor(k / p.w), p.c + k % p.w])).some(([y, x]) => y === r && x === c));
+      const strip = [];
+      for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+        if (wallAt(r, c)) continue;
+        const pc = pieceAt(r, c);
+        if (pc && pc.h * pc.w > 1) continue;
+        for (const [dr, dc, side] of [[0, -1, 'R'], [0, 1, 'L'], [-1, 0, 'B'], [1, 0, 'T']]) {
+          // (r - dr, c - dc) is the open cell the strip faces; the strip is past its far side.
+          const ar = r + dr, ac = c + dc;
+          if (!freeAt(ar, ac)) continue;
+          const pa = pieceAt(ar, ac);
+          if (pa && pa === pc) continue;
+          const at2 = (d, t) => at(rect.x + (c + 0.5 - dc * (d - 0.5) + (dc ? 0 : t - 0.5)) * cw, rect.y + (r + 0.5 - dr * (d - 0.5) + (dr ? 0 : t - 0.5)) * ch, rad);
+          const near = [0.2, 0.35, 0.5].flatMap(d => [0.15, 0.3, 0.7, 0.85].map(t => classify(at2(d, t))));
+          const far = [0.82, 0.92].flatMap(d => [0.15, 0.3, 0.7, 0.85].map(t => classify(at2(d, t))));
+          const solidNear = near.filter(k => SOLID.has(k));
+          if (solidNear.length < 9) continue;
+          const col = vote(solidNear);
+          if (!col || near.filter(k => k === col || (PARTNER[col] || []).includes(k)).length < 9) continue;
+          if (far.filter(k => ['empty', 'frame', 'track'].includes(k)).length < 6) continue;
+          strip.push({ r, c, side, col, at: side === 'L' || side === 'R' ? ac : ar });
+        }
+      }
+      // Neighbouring strip cells of one colour facing the same way are one exit.
+      strip.sort((a, b) => (a.side === 'L' || a.side === 'R') ? a.c - b.c || a.r - b.r : a.r - b.r || a.c - b.c);
+      const used = new Set();
+      for (const s0 of strip) {
+        if (used.has(s0)) continue;
+        const run = [s0];
+        const flat = s0.side === 'L' || s0.side === 'R';
+        for (let next; (next = strip.find(x => !used.has(x) && !run.includes(x) && x.side === s0.side && x.col === s0.col && x.at === s0.at && (flat ? x.c === s0.c && x.r === run[run.length - 1].r + 1 : x.r === s0.r && x.c === run[run.length - 1].c + 1)));) run.push(next);
+        run.forEach(x => used.add(x));
+        for (const x of run) { const pc = pieceAt(x.r, x.c); if (pc) pieces.splice(pieces.indexOf(pc), 1); walls.push([x.r, x.c]); }
+        gates.push({ id: gid++, side: s0.side, start: flat ? s0.r : s0.c, len: run.length, at: s0.at, color: s0.col, frozen: 0 });
+      }
+    }
     // Empty pockets closed in by walls (e.g. between two inner exits) can't be reached: walls too.
     {
       const taken = new Set();
@@ -908,6 +993,37 @@ const Detect = (() => {
       const mx = rect.x + (p.c + p.w / 2) * cw, my = rect.y + (p.r + p.h / 2) * ch;
       const n = readNumber(img, mx - 0.45 * cw, my - 0.45 * ch, mx + 0.45 * cw, my + 0.45 * ch, p.crate ? 'c' : 'i');
       if (n) { p.ice = n; p.read = true; }
+    }
+
+    // A crate's badge can sit right on a cell border or corner, splitting the crate where the badge
+    // hides the planks (Level 219). Look for the number on unread fragments' edges and corners, and
+    // join every fragment touching it.
+    const cellsOfF = p => p.shape ? p.shape.map(([a, b]) => [p.r + a, p.c + b]) : [...Array(p.h * p.w).keys()].map(i => [p.r + Math.floor(i / p.w), p.c + i % p.w]);
+    for (let again = true; again;) {
+      again = false;
+      for (const frag of pieces.filter(p => p.crate && !p.read)) {
+        const { r, c, h, w } = frag;
+        const pts = [[r + h / 2, c], [r + h / 2, c + w], [r, c + w / 2], [r + h, c + w / 2], [r, c], [r, c + w], [r + h, c], [r + h, c + w]];
+        let hit = null;
+        for (const [y, x] of pts) {
+          const mx = rect.x + x * cw, my = rect.y + y * ch;
+          const n = readNumber(img, mx - 0.45 * cw, my - 0.45 * ch, mx + 0.45 * cw, my + 0.45 * ch, 'c');
+          if (n) { hit = { y, x, n }; break; }
+        }
+        if (!hit) continue;
+        // Fragments with a cell touching the badge point.
+        const touch = pieces.filter(p => p.crate && !p.read && cellsOfF(p).some(([y, x]) => hit.y >= y - 0.01 && hit.y <= y + 1.01 && hit.x >= x - 0.01 && hit.x <= x + 1.01));
+        const all = touch.flatMap(cellsOfF);
+        const r0 = Math.min(...all.map(q => q[0])), c0 = Math.min(...all.map(q => q[1]));
+        const host = touch[0];
+        host.r = r0; host.c = c0;
+        host.h = Math.max(...all.map(q => q[0])) - r0 + 1; host.w = Math.max(...all.map(q => q[1])) - c0 + 1;
+        if (all.length === host.h * host.w) delete host.shape; else host.shape = all.map(([y, x]) => [y - r0, x - c0]);
+        host.ice = hit.n; host.read = true;
+        touch.slice(1).forEach(p => pieces.splice(pieces.indexOf(p), 1));
+        again = true;
+        break;
+      }
     }
 
     // Every crate shows its number; a numberless crate fragment (a corner cut off by the rim)

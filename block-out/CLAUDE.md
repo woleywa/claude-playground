@@ -148,3 +148,17 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
 - Star cells need ≥8 cream samples in all four quarters.
 - App draws pieces in the game's colours with studs and SVG lookalike icons (key+gem, rocket, battery,
   padlock+chains, crate badge).
+
+## Level 219 notes (detection)
+- Grid finder: seam samples with crate/frame on both sides are skipped (big crates favoured a coarse
+  lattice). A lattice with twice the count also wins (score ≥ 40% of the base) when its extra lines show
+  ≥1.4× the seam of its cells' mid-lines (+0.01), or its stud contrast (quarter points vs centre) is ≥8
+  below the base's. Verified on all 14 screenshots × 7 sizes × smooth/nearest resampling.
+- Exit strips on inner edges: a cell whose near part (0.2–0.5 cell from an open neighbour) is a piece
+  colour and whose far part is background/frame is an exit facing that neighbour (orange ▶ exit where
+  the board narrows); neighbouring strip cells join; the cells become walls.
+- Edge exits need <4 background/frame samples (orange debris flying past read as a red exit).
+- Crate badges on a cell border/corner split crates: unread fragments look for their number at edge
+  midpoints and corners; every fragment touching the badge joins.
+- Icon cells averaging to frame take the colour covering ≥20 samples if ≥2 corners show that family.
+- Level 219 → 8×12, crates 8 / 12 / 17, orange inner-edge exit, 7 frozen exits; 22 moves, 4 out.
