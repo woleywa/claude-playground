@@ -160,7 +160,23 @@ function el(tag, cls, css) {
   return d;
 }
 
+// An inner exit sits in wall cells inside the board: `at` is the first open row/column in
+// front of it, so its cells are just beyond that on the side it faces.
+function innerCells(gt) {
+  if (gt.at == null) return null;
+  const out = [];
+  for (let k = gt.start; k < gt.start + gt.len; k++)
+    out.push(gt.side === 'T' ? [gt.at - 1, k] : gt.side === 'B' ? [gt.at + 1, k] : gt.side === 'L' ? [k, gt.at - 1] : [k, gt.at + 1]);
+  return out;
+}
+
 function gateBox(gt, cs, g) {
+  const cells = innerCells(gt);
+  if (cells) {
+    const r = Math.min(...cells.map(q => q[0])), c = Math.min(...cells.map(q => q[1]));
+    const h = Math.max(...cells.map(q => q[0])) - r + 1, w = Math.max(...cells.map(q => q[1])) - c + 1;
+    return rectCss(r, c, h, w, cs, g, 4);
+  }
   const along = gt.start * cs + g + 3, len = gt.len * cs - 6;
   if (gt.side === 'L') return { left: '3px', top: along + 'px', width: (g - 6) + 'px', height: len + 'px' };
   if (gt.side === 'R') return { left: (g + level.W * cs + 3) + 'px', top: along + 'px', width: (g - 6) + 'px', height: len + 'px' };
@@ -292,7 +308,29 @@ function reshape(p, cells) {
   else p.shape = cells.map(([y, x]) => [y - r, x - c]);
   return p;
 }
-const gateAt = (side, k) => level.gates.find(gt => gt.side === side && k >= gt.start && k < gt.start + gt.len);
+const gateAt = (side, k) => level.gates.find(gt => gt.at == null && gt.side === side && k >= gt.start && k < gt.start + gt.len);
+const innerGateAt = (r, c) => level.gates.find(gt => (innerCells(gt) || []).some(([y, x]) => y === r && x === c));
+
+// Draw exit on a wall cell: the exit faces the open cell nearest to where it was tapped, and
+// joins a matching exit in the next wall cell along.
+function addInnerGate(h) {
+  const { cs, g } = metrics();
+  const dx = h.x - (g + (h.c + 0.5) * cs), dy = h.y - (g + (h.r + 0.5) * cs);
+  const open = [[1, 0, 'T'], [-1, 0, 'B'], [0, 1, 'L'], [0, -1, 'R']]
+    .filter(([dr, dc]) => { const r = h.r + dr, c = h.c + dc; return r >= 0 && c >= 0 && r < level.H && c < level.W && !isWall(r, c); })
+    .sort((a, b) => (b[1] * dx + b[0] * dy) - (a[1] * dx + a[0] * dy));
+  if (!open.length) { status('An exit in a wall needs an open cell next to it.', 'err'); return; }
+  const [dr, dc, side] = open[0];
+  const flat = side === 'L' || side === 'R';
+  const k = flat ? h.r : h.c, at = flat ? h.c + dc : h.r + dr;
+  level.gates = level.gates.filter(x => x !== innerGateAt(h.r, h.c));
+  const next = level.gates.find(x => x.at === at && x.side === side && x.color === color && !x.frozen && (x.start + x.len === k || x.start === k + 1));
+  let gt;
+  if (next) { gt = next; gt.start = Math.min(gt.start, k); gt.len++; }
+  else { gt = { id: nextId(level.gates), side, start: k, len: 1, at, color, frozen: 0 }; level.gates.push(gt); }
+  sel = { kind: 'gate', id: gt.id };
+  changed();
+}
 const nextId = list => list.reduce((m, x) => Math.max(m, x.id), 0) + 1;
 
 function changed() { save(); render(); inspector(); }
@@ -331,7 +369,7 @@ $('board').addEventListener('pointerdown', e => {
   }
   if (tool === 'select' || tool === 'erase') {
     const p = h.inside ? pieceAt(h.r, h.c) : null;
-    const gt = h.edge ? gateAt(...h.edge) : null;
+    const gt = h.edge ? gateAt(...h.edge) : h.inside && !p ? innerGateAt(h.r, h.c) : null;
     if (tool === 'erase') {
       if (p) level.pieces = level.pieces.filter(x => x !== p);
       if (gt) level.gates = level.gates.filter(x => x !== gt);
@@ -341,6 +379,7 @@ $('board').addEventListener('pointerdown', e => {
     return;
   }
   if (tool === 'draw' && h.inside) drag = { kind: 'draw', r0: h.r, c0: h.c, r1: h.r, c1: h.c };
+  if (tool === 'gate' && h.inside && isWall(h.r, h.c)) { addInnerGate(h); return; }
   if (tool === 'gate' && h.edge) drag = { kind: 'gate', side: h.edge[0], k0: h.edge[1], k1: h.edge[1] };
   if (drag) { $('board').setPointerCapture(e.pointerId); render(); }
 });
@@ -356,6 +395,7 @@ function paintTrack(r, c, on) {
 function paintWall(r, c, on) {
   if (pieceAt(r, c) || isWall(r, c) === on) return;
   if (on) level.tracks = (level.tracks || []).filter(([y, x]) => y !== r || x !== c);
+  else level.gates = level.gates.filter(gt => gt !== innerGateAt(r, c));
   level.walls = on ? [...(level.walls || []), [r, c]] : level.walls.filter(([y, x]) => y !== r || x !== c);
   save(); render();
 }
@@ -384,7 +424,7 @@ $('board').addEventListener('pointerup', () => {
     sel = { kind: 'piece', id: p.id };
   } else {
     const s = Math.min(drag.k0, drag.k1), len = Math.abs(drag.k1 - drag.k0) + 1;
-    level.gates = level.gates.filter(gt => gt.side !== drag.side || gt.start >= s + len || gt.start + gt.len <= s);
+    level.gates = level.gates.filter(gt => gt.at != null || gt.side !== drag.side || gt.start >= s + len || gt.start + gt.len <= s);
     const gt = { id: nextId(level.gates), side: drag.side, start: s, len, color, frozen: 0 };
     level.gates.push(gt);
     sel = { kind: 'gate', id: gt.id };
@@ -458,7 +498,9 @@ function inspector() {
     }
   } else {
     const span = obj.len > 1 ? `${obj.start + 1}–${obj.start + obj.len}` : obj.start + 1;
-    box.appendChild(el('h3')).textContent = `${NAMES[obj.color]} exit · ${SIDE[obj.side]} side, ${obj.side === 'L' || obj.side === 'R' ? 'row' : 'col'} ${span}`;
+    const where = obj.at != null ? `in the wall, out ${ARROW[obj.side]} from ${obj.side === 'L' || obj.side === 'R' ? 'col ' + (obj.at + 1) : 'row ' + (obj.at + 1)},`
+      : `${SIDE[obj.side]} side,`;
+    box.appendChild(el('h3')).textContent = `${NAMES[obj.color]} exit · ${where} ${obj.side === 'L' || obj.side === 'R' ? 'row' : 'col'} ${span}`;
     box.appendChild(colorRow(obj.color, k => obj.color = k));
     const star = el('label', 'check');
     const sb = el('input'); sb.type = 'checkbox'; sb.checked = !!obj.star;
@@ -512,7 +554,8 @@ function resize() {
   level.pieces = level.pieces.filter(p => p.r + p.h <= H && p.c + p.w <= W);
   level.walls = (level.walls || []).filter(([r, c]) => r < H && c < W);
   level.tracks = (level.tracks || []).filter(([r, c]) => r < H && c < W);
-  level.gates = level.gates.filter(gt => gt.start + gt.len <= (gt.side === 'L' || gt.side === 'R' ? H : W));
+  level.gates = level.gates.filter(gt => gt.start + gt.len <= (gt.side === 'L' || gt.side === 'R' ? H : W)
+    && (innerCells(gt) || []).every(([r, c]) => r >= 0 && c >= 0 && r < H && c < W));
   changed();
 }
 $('w').addEventListener('change', resize);
@@ -542,7 +585,7 @@ function describe(s) {
   const name = `${pieceName(p)} (row ${s.fromR + 1}, col ${s.fromC + 1})`;
   if (s.kind === 'exit') {
     const gt = s.before.gates.find(x => x.id === s.gateId);
-    return `${name} → out the ${SIDE[gt.side]} exit` + (p.inner ? ` (the ${NAMES[p.inner].toLowerCase()} core stays)` : '');
+    return `${name} → out the ${gt.at != null ? ARROW[gt.side] + ' exit in the wall' : SIDE[gt.side] + ' exit'}` + (p.inner ? ` (the ${NAMES[p.inner].toLowerCase()} core stays)` : '');
   }
   return `Move ${name} → row ${s.r + 1}, col ${s.c + 1}`;
 }
@@ -659,8 +702,9 @@ function stepForward() {
   const leaves = s.kind === 'exit' && !p.inner;
   if (leaves) {
     const gt = s.before.gates.find(x => x.id === s.gateId);
-    pts.push(gt.side === 'L' ? [s.r, -p.w] : gt.side === 'R' ? [s.r, level.W]
-           : gt.side === 'T' ? [-p.h, s.c] : [level.H, s.c]);
+    const at = gt.at ?? (gt.side === 'L' || gt.side === 'T' ? 0 : gt.side === 'R' ? level.W - 1 : level.H - 1);
+    pts.push(gt.side === 'L' ? [s.r, at - p.w] : gt.side === 'R' ? [s.r, at + 1]
+           : gt.side === 'T' ? [at - p.h, s.c] : [at + 1, s.c]);
   }
   // Keep only the corners of the path so the piece glides in straight lines.
   const corners = pts.filter((q, i) => i === 0 || i === pts.length - 1 ||

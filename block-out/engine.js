@@ -4,6 +4,8 @@
 //   color '?' = unknown (still under ice / inside a crate); inner = colour left behind when it leaves
 //   axis 'h' | 'v' = arrow piece, moves (and leaves) only along it; star = leaves only through star exits
 // gate.star = star exit: star pieces need one; normal pieces may use it too
+// gate.at = the row/column the exit opens from, for an exit in an inner wall (default: the board edge);
+//   e.g. { side: 'T', at: 5 } lets pieces leave upward through the top of row 5
 // gate:  { id, side: 'L'|'R'|'T'|'B', start, len, color, frozen }
 // level: { W, H, walls: [[r, c], …], tracks: [[r, c, color], …], pieces, gates, tickPerCell }
 //   a track cell only lets pieces of its colour move across it
@@ -24,6 +26,21 @@ const Engine = (() => {
     return rects.get(k);
   }
   const cellsOf = (p, r = p.r, c = p.c) => offsets(p).map(([dr, dc]) => [r + dr, c + dc]);
+  // The cells between a piece's cells and the exit (the way out), or null if the piece is on the
+  // wrong side of it or outside the exit's span.
+  function laneOf(level, gt, cells) {
+    const across = gt.side === 'L' || gt.side === 'R' ? cells.map(q => q[0]) : cells.map(q => q[1]);
+    if (Math.min(...across) < gt.start || Math.max(...across) >= gt.start + gt.len) return null;
+    const at = gt.at ?? (gt.side === 'L' || gt.side === 'T' ? 0 : gt.side === 'R' ? level.W - 1 : level.H - 1);
+    const out = [];
+    for (const [y, x] of cells) {
+      if (gt.side === 'L') { if (x < at) return null; for (let k = at; k < x; k++) out.push([y, k]); }
+      else if (gt.side === 'R') { if (x > at) return null; for (let k = x + 1; k <= at; k++) out.push([y, k]); }
+      else if (gt.side === 'T') { if (y < at) return null; for (let k = at; k < y; k++) out.push([k, x]); }
+      else { if (y > at) return null; for (let k = y + 1; k <= at; k++) out.push([k, x]); }
+    }
+    return out;
+  }
   const ALL = [[1,0],[-1,0],[0,1],[0,-1]], H_ONLY = [[0,1],[0,-1]], V_ONLY = [[1,0],[-1,0]];
   const dirsOf = p => p.axis === 'h' ? H_ONLY : p.axis === 'v' ? V_ONLY : ALL;
   const gateOk = (p, gt) => !gt.frozen && gt.color === p.color && (!p.star || gt.star)
@@ -84,17 +101,8 @@ const Engine = (() => {
     };
     for (const gt of gates) {
       if (!gateOk(p, gt)) continue;
-      const end = gt.start + gt.len;
-      const across = gt.side === 'L' || gt.side === 'R' ? cells.map(q => q[0]) : cells.map(q => q[1]);
-      if (Math.min(...across) < gt.start || Math.max(...across) >= end) continue;
-      const clear = cells.every(([y, x]) => {
-        if (gt.side === 'L') { for (let k = 0; k < x; k++) if (!free(y, k)) return false; }
-        if (gt.side === 'R') { for (let k = x + 1; k < level.W; k++) if (!free(y, k)) return false; }
-        if (gt.side === 'T') { for (let k = 0; k < y; k++) if (!free(k, x)) return false; }
-        if (gt.side === 'B') { for (let k = y + 1; k < level.H; k++) if (!free(k, x)) return false; }
-        return true;
-      });
-      if (clear) return gt;
+      const lane = laneOf(level, gt, cells);
+      if (lane && lane.every(([y, x]) => free(y, x))) return gt;
     }
     return null;
   }
@@ -152,16 +160,10 @@ const Engine = (() => {
       const cells = cellsOf(T, r, c);
       let best = Infinity, bestRun = [];
       for (const gt of gates) {
-        const across = gt.side === 'L' || gt.side === 'R' ? cells.map(q => q[0]) : cells.map(q => q[1]);
-        if (Math.min(...across) < gt.start || Math.max(...across) >= gt.start + gt.len) continue;
+        const run = laneOf(level, gt, cells);
+        if (!run) continue;
         let s = 0;
-        for (const [y, x] of cells) {
-          const run = gt.side === 'L' ? [...Array(x).keys()].map(k => [y, k])
-            : gt.side === 'R' ? [...Array(W - x - 1).keys()].map(k => [y, x + 1 + k])
-            : gt.side === 'T' ? [...Array(y).keys()].map(k => [k, x])
-            : [...Array(H - y - 1).keys()].map(k => [y + 1 + k, x]);
-          for (const [yy, xx] of run) { s += cell(yy, xx); if (want) want.push([yy, xx]); }
-        }
+        for (const [yy, xx] of run) { s += cell(yy, xx); if (want) want.push([yy, xx]); }
         if (s < best) { best = s; bestRun = want ? want.splice(0) : []; } else if (want) want.length = 0;
       }
       return want ? bestRun : best;
@@ -240,20 +242,14 @@ const Engine = (() => {
       const cells = cellsOf(P, (a / W) | 0, a % W);
       for (const gt of st.gates) {
         if (!gateOk(P, gt)) continue;
-        const across = gt.side === 'L' || gt.side === 'R' ? cells.map(q => q[0]) : cells.map(q => q[1]);
-        if (Math.min(...across) < gt.start || Math.max(...across) >= gt.start + gt.len) continue;
+        const run = laneOf(level, gt, cells);
+        if (!run) continue;
         const lane = [];
         let ok = true;
-        for (const [y, x] of cells) {
-          const run = gt.side === 'L' ? [...Array(x).keys()].map(k => y * W + k)
-            : gt.side === 'R' ? [...Array(W - x - 1).keys()].map(k => y * W + x + 1 + k)
-            : gt.side === 'T' ? [...Array(y).keys()].map(k => k * W + x)
-            : [...Array(H - y - 1).keys()].map(k => (y + 1 + k) * W + x);
-          for (const i of run) {
-            const t = tr.get(i);
-            if (base[i] !== -1 || (t && t !== P.color)) ok = false;
-            lane.push(i);
-          }
+        for (const [y, x] of run) {
+          const i = y * W + x, t = tr.get(i);
+          if (base[i] !== -1 || (t && t !== P.color)) ok = false;
+          lane.push(i);
         }
         if (ok) (lanes[a] = lanes[a] || []).push(lane);
       }

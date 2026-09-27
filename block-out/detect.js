@@ -335,6 +335,13 @@ const Detect = (() => {
         const starry = creamN / 49 >= 0.12 && faceN > 0 && quad.filter(q => q > 0).length >= 3;
         if (starry) label = nearestSolid(face.map(v => v / faceN));
         starCell.push(starry);
+        // Narrow crates: the gold/red rim covers a cell's corners, but planks fill much of it.
+        const planks = (hist.crate || 0) + (hist.frame || 0);
+        const rimOnly = Object.keys(hist).every(k => !SOLID.has(k) || ['yellow', 'orange', 'red'].includes(k));
+        if (planks >= 15 && rimOnly && !goldHit) label = 'frame';
+        // An icon (battery) can average out to the frame colour; the piece still shows all round it.
+        const cv = vote(corners);
+        if (['frame', 'crate'].includes(label) && SOLID.has(cv) && !['yellow', 'orange', 'red'].includes(cv) && top.length && top[0][0] === cv && top[0][1] >= 15) label = cv;
         // A big icon (double rocket) can cover the corners; the colour covering most of the cell wins.
         if (m.dist > 45 && !goldHit && top.length && top[0][1] >= 20 && SOLID.has(label) && label !== top[0][0]) label = top[0][0];
         // The core runs through the piece's middle, so it also shows at the cell's centre.
@@ -656,6 +663,29 @@ const Detect = (() => {
     edge('R', H, (t, d = 0.4) => [rect.x + rect.w + d * cw, rect.y + t * ch]);
     edge('T', W, (t, d = 0.4) => [rect.x + t * cw, rect.y - d * ch]);
     edge('B', W, (t, d = 0.4) => [rect.x + t * cw, rect.y + rect.h + d * ch]);
+
+    // Inner exits: a flat one-cell block with a white arrow, set into a wall so that it faces a
+    // single open cell. Pieces leave through it from that cell (e.g. ▲ above an empty cell).
+    const wallAt = (r, c) => r < 0 || c < 0 || r >= H || c >= W || walls.some(([y, x]) => y === r && x === c);
+    for (const p of [...pieces]) {
+      if (p.h !== 1 || p.w !== 1 || p.ice || p.lock || p.key || p.star || p.color === '?') continue;
+      const { r, c } = p;
+      const open = [[1, 0, 'T'], [-1, 0, 'B'], [0, 1, 'L'], [0, -1, 'R']].filter(([dr, dc]) => !wallAt(r + dr, c + dc));
+      if (open.length !== 1) continue;
+      let white = 0, tot = 0, tex = 0;
+      for (let a = 0; a < 12; a++) for (let b = 0; b < 12; b++) {
+        const x = rect.x + (c + 0.1 + 0.8 * a / 11) * cw, y = rect.y + (r + 0.1 + 0.8 * b / 11) * ch;
+        const v = at(x, y, 0); tot++;
+        if (Math.min(...v) > 200) white++;
+        tex += Math.abs(lum(at(x + 2, y, 0)) - lum(at(x - 2, y, 0))) + Math.abs(lum(at(x, y + 2, 0)) - lum(at(x, y - 2, 0)));
+      }
+      // Studded pieces are busy all over; an exit is a plain face with a small white arrow.
+      if (white / tot < 0.03 || tex / tot > 25) continue;
+      const [dr, dc, side] = open[0];
+      gates.push({ id: gid++, side, start: side === 'L' || side === 'R' ? r : c, len: 1, at: side === 'L' || side === 'R' ? c + dc : r + dr, color: p.color, frozen: 0 });
+      pieces.splice(pieces.indexOf(p), 1);
+      walls.push([r, c]);
+    }
 
     // Counters: frozen exits, crates and ice show their number.
     for (const gt of gates) {

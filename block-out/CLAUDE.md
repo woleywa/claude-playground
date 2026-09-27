@@ -26,6 +26,10 @@ Vanilla HTML + CSS + JS, no build step, no dependencies. Hosted on GitHub Pages 
 - Tracks (`level.tracks` = `[r, c, colour]`, hollow outlined cells): only pieces of that colour may cross.
 - Items on pieces (`item: 'battery'` = time bonus, `'rocket'`) are shown but don't affect solving.
 - Walls can also sit inside the board (raised frame-coloured blocks, e.g. Level 207).
+- Inner exits (Level 215): an exit set into a wall inside the board. `gate.at` = the first open row/col
+  in front of it (e.g. `{ side: 'T', start: 6, len: 1, at: 5 }` = leave upward from row 5, col 6; the exit's
+  own cell (4,6) is a wall). `Engine.laneOf` handles both kinds. Draw exit on a wall cell makes one facing
+  the open neighbour nearest the tap (app.js `addInnerGate`, `innerCells`).
 - Arrow pieces (`axis: 'h'|'v'`, flat face with a big ⇔/⇕): move and leave only along the arrow.
 - Star pieces (`star`, cream star studs) leave only through star exits (`gate.star`); normal pieces
   may use star exits too (Level 211).
@@ -91,6 +95,11 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
   that becomes a rectangle) — the rim can cut corners off in some resamplings.
 - Padlock needs ≥15% gold in its cell (rockets are mostly red); in icon cells the colour covering most
   of the cell wins over the corners (a big double rocket can cover them).
+- Narrow crates: a cell with ≥15 plank samples and only rim colours (yellow/orange/red) is crate.
+  An icon cell (battery) whose average is frame-coloured but whose corners and ≥15 samples show one piece
+  colour is that piece.
+- Inner exit = a flat (low texture) 1×1 piece with ≥3% white pixels and exactly one open neighbour
+  (others are walls or off the board) → becomes a wall cell + a gate with `at`, facing that neighbour.
 
 ## Testing
 
@@ -102,4 +111,6 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
 - Level 213 → 7×12: 6×7 crate, wall row with a gap, T/green/orange/ice whole; 3 moves then screenshot.
 - Level 211 screenshots → 7×9; later state: 12 of 15 out, then two thawed exits need a screenshot.
 - "Level 205" preset (top exit 10) → 10 pieces out, then the top exit thaws with an unknown colour.
+- Level 215 → 7×8: crates 13 / 11, inner purple ▲ exit at r4 c6, frozen 9 / 3 / 1; 46 moves, 3 out, then a
+  screenshot (two frozen exits thawed).
 - Importing the Level 198 / 204 / 205 screenshots: 7×10 (31 pieces, 11 exits) / 7×10 (14, 5) / 7×8 (14, 4 + 24 tracks).
