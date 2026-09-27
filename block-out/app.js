@@ -525,14 +525,26 @@ function drawBox() {
   box.style.setProperty('--h', $('imp-h').value || 1);
 }
 const stagePos = e => { const r = img.getBoundingClientRect(); return [Math.max(0, Math.min(r.width, e.clientX - r.left)), Math.max(0, Math.min(r.height, e.clientY - r.top))]; };
-stage.addEventListener('pointerdown', e => { e.preventDefault(); impDrag = stagePos(e); stage.setPointerCapture(e.pointerId); });
-stage.addEventListener('pointermove', e => {
+// iOS Safari treats a finger on an image as an image drag, so the image ignores pointers
+// and touch events are handled directly alongside pointer events.
+function boxStart(pt) { impDrag = stagePos(pt); }
+function boxMove(pt) {
   if (!impDrag) return;
-  const [x, y] = stagePos(e);
+  const [x, y] = stagePos(pt);
   impRect = { x: Math.min(x, impDrag[0]), y: Math.min(y, impDrag[1]), w: Math.abs(x - impDrag[0]), h: Math.abs(y - impDrag[1]) };
   drawBox();
-});
-stage.addEventListener('pointerup', () => { impDrag = null; $('imp-go').disabled = !(impRect && impRect.w > 20 && impRect.h > 20); });
+}
+function boxEnd() {
+  impDrag = null;
+  $('imp-go').disabled = !(impRect && impRect.w > 20 && impRect.h > 20);
+}
+stage.addEventListener('pointerdown', e => { e.preventDefault(); boxStart(e); try { stage.setPointerCapture(e.pointerId); } catch {} });
+stage.addEventListener('pointermove', e => boxMove(e));
+stage.addEventListener('pointerup', boxEnd);
+stage.addEventListener('pointercancel', boxEnd);
+stage.addEventListener('touchstart', e => { e.preventDefault(); boxStart(e.touches[0]); }, { passive: false });
+stage.addEventListener('touchmove', e => { e.preventDefault(); boxMove(e.touches[0]); }, { passive: false });
+stage.addEventListener('touchend', boxEnd);
 $('imp-w').addEventListener('input', drawBox);
 $('imp-h').addEventListener('input', drawBox);
 
