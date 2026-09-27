@@ -10,16 +10,21 @@ const Detect = (() => {
     lime:   '6dbf0e 6fc20e',
     blue:   '1051d2 1158d8 0554e3 0254ee',
     purple: '8c30d9 9333e2 8d2fde 9e36f2',
-    green:  '12b370 15bb77 08ba79',
+    green:  '12b370 15bb77 08ba79 0a8315',
     red:    'df2b1f f52824',
     orange: 'ed5f09',
     ice:    '0676f3 10b5f7',
     crate:  '473abd 3f2db4 4336b8',
     empty:  '262260 1f1e5a',
+    track:  '665941 62563d 685b43 6b5e48 5e533f',
     frame:  '4b41ab 463ea2 4a40aa',
     frozen: 'd8e6f2 c8d8ea cce3ef c3e2ed',
   }).map(([k, v]) => [k, v.split(' ').map(hex)]));
-  const NOT_PIECE = new Set(['empty', 'frame', 'frozen']);
+  const NOT_PIECE = new Set(['empty', 'frame', 'frozen', 'track']);
+  const SOLID = new Set(['pink', 'yellow', 'sky', 'lime', 'blue', 'purple', 'green', 'red', 'orange']);
+  // Colour pairs that shading alone can produce inside one plain piece.
+  const PARTNER = { yellow: ['orange'], orange: ['yellow', 'red'], red: ['orange', 'pink'], pink: ['red', 'purple'],
+    blue: ['sky', 'purple'], sky: ['blue'], green: ['lime'], lime: ['green'], purple: ['pink', 'blue'] };
   const FRAME = hex('4a41aa');
   const dist = (a, b) => Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2);
 
@@ -177,9 +182,12 @@ const Detect = (() => {
       const cs = Wg / n, m = Math.round(Hg / cs);
       if (m < 3 || m > 16 || Math.abs(Hg / cs - m) > 0.15) continue;
       const vals = [];
+      // Let each line find its seam within a few % of a cell, so small edge errors don't matter.
+      const win = [];
+      for (let o = -Math.max(2, Math.round(0.05 * cs)); o <= Math.max(2, Math.round(0.05 * cs)); o++) win.push(o);
       const valley = (lineAt, sideA, sideB) => {
-        const line = Math.min(...[-2, -1, 0, 1, 2].map(lineAt));
-        vals.push(Math.max(0, Math.min(sideA, sideB) - line));
+        const line = Math.min(...win.map(lineAt));
+        vals.push(Math.max(0, 1 - line / Math.max(1, Math.min(sideA, sideB))));
       };
       for (let k = 1; k < n; k++)
         for (let j = 0; j < m; j++)
@@ -193,11 +201,28 @@ const Detect = (() => {
             const x = gx0 + (k + t) * cs, y = gy0 + j * cs;
             valley(o => lum(px(x, y + o)), lum(px(x, y - 0.18 * cs)), lum(px(x, y + 0.18 * cs)));
           }
-      cands.push({ n, m, score: vals.reduce((a, b) => a + b, 0) / vals.length });
+      const score = vals.reduce((a, b) => a + b, 0) / vals.length;
+      // With the right lattice each cell is mostly one colour; a wrong one cuts across pieces.
+      let purity = 0;
+      for (let j = 0; j < m; j++)
+        for (let k = 0; k < n; k++) {
+          const h = {};
+          for (const u of [-0.3, -0.15, 0, 0.15, 0.3])
+            for (const v of [-0.3, -0.15, 0, 0.15, 0.3]) {
+              const l = classify(at(gx0 + (k + 0.5 + u) * cs, gy0 + (j + 0.5 + v) * cs, 1));
+              h[l] = (h[l] || 0) + 1;
+            }
+          purity += Math.max(...Object.values(h)) / 25;
+        }
+      purity /= n * m;
+      // Cells are square, so the right count also makes the rows come out (nearly) whole.
+      cands.push({ n, m, score, purity, fit: score * purity * purity * Math.max(0, 1 - Math.abs(Hg / cs - m) / 0.5) });
     }
     if (!cands.length) return null;
-    const top = Math.max(...cands.map(c => c.score));
-    const pick = cands.filter(c => c.score >= 0.8 * top).sort((a, b) => b.n - a.n)[0];
+    const base = cands.reduce((a, b) => b.fit > a.fit ? b : a);
+    // A lattice with twice the columns contains every true line too; only prefer it when its
+    // seams score about as well, and never prefer an unrelated count.
+    const pick = cands.filter(c => c.n % base.n === 0 && c.score >= 0.8 * base.score).sort((a, b) => b.n - a.n)[0];
 
     return { rect: { x: gx0, y: gy0, w: Wg, h: Hg }, W: pick.n, H: pick.m };
   }
@@ -211,7 +236,7 @@ const Detect = (() => {
 
     // Cell colour = average over most of the cell. An icon (padlock, crate badge) skews the
     // average away from every reference; then the corners, which it doesn't cover, decide.
-    const cls = [], odd = [], lockCell = [];
+    const cls = [], odd = [], lockCell = [], layer = [], trackColor = [];
     const gold = ([R, G, B]) => R > 150 && G > 80 && G < 200 && B < 60;
     const step = Math.max(1, Math.round(Math.min(cw, ch) / 25));
     for (let r = 0; r < H; r++)
@@ -226,11 +251,48 @@ const Detect = (() => {
         const corners = [[-.3,-.3],[.3,-.3],[-.3,.3],[.3,.3]].map(([dx, dy]) => classify(at(cx(c) + dx*cw, cy(r) + dy*ch, rad)));
         odd.push(m.dist > 45);
         // A padlock: an icon cell with gold somewhere around its middle.
-        const goldHit = m.dist > 45 && !['yellow', 'orange'].includes(vote(corners)) && [[0,0],[0,.18],[.15,.15],[-.15,.15],[0,-.2],[.12,0],[-.12,0]]
-          .some(([dx, dy]) => gold(at(cx(c) + dx*cw, cy(r) + dy*ch, rad)));
+        // A padlock: an icon cell with gold and its red number badge around the middle.
+        const near = [[0,0],[0,.18],[.15,.15],[-.15,.15],[0,-.2],[.12,0],[-.12,0],[.1,-.1],[-.1,-.1]]
+          .map(([dx, dy]) => at(cx(c) + dx*cw, cy(r) + dy*ch, rad));
+        const goldHit = m.dist > 45 && (SOLID.has(vote(corners)) || vote(corners) === 'ice') && !['yellow', 'orange'].includes(vote(corners))
+          && near.some(gold) && near.some(([R, G, B]) => (R > 170 && G < 70 && B < 70) || (!['blue', 'sky'].includes(vote(corners)) && B > 170 && R < 90 && G < 170));
         lockCell.push(goldHit);
         let label = m.dist > 45 ? vote(corners) : m.name;
         if (goldHit && label === 'ice') label = 'blue';
+        if (m.name === 'track' && m.dist < 25) label = 'track';
+
+        // Layered piece: two unrelated colours each cover a good part of the cell; the one along
+        // the cell's border is the outer layer, the other is the core.
+        const hist = {}, rim = {};
+        for (let i = 0; i < 7; i++)
+          for (let j = 0; j < 7; j++) {
+            const k = classify(at(cx(c) + (-0.42 + 0.14 * i) * cw, cy(r) + (-0.42 + 0.14 * j) * ch, rad));
+            hist[k] = (hist[k] || 0) + 1;
+            if (i === 0 || i === 6 || j === 0 || j === 6) rim[k] = (rim[k] || 0) + 1;
+          }
+        // Fold shading (e.g. orange edges on yellow) into the stronger colour it belongs with.
+        const solid = Object.entries(hist).filter(([k]) => SOLID.has(k)).sort((a, b) => b[1] - a[1]);
+        const merged = {};
+        for (const [k, n] of solid) {
+          const home = Object.keys(merged).find(h => (PARTNER[h] || []).includes(k));
+          if (home) merged[home] += n; else merged[k] = n;
+        }
+        const top = Object.entries(merged).sort((a, b) => b[1] - a[1]);
+        let core = null;
+        // The core runs through the piece's middle, so it also shows at the cell's centre.
+        const mid = vote([[0,0],[.08,0],[-.08,0],[0,.08],[0,-.08]].map(([dx, dy]) => classify(at(cx(c) + dx*cw, cy(r) + dy*ch, rad))));
+        if (!goldHit && label !== 'track' && top.length >= 2 && top[1][1] >= 6 && !(PARTNER[top[0][0]] || []).includes(top[1][0])) {
+          const [a, b] = [top[0][0], top[1][0]];
+          const outer = (rim[a] || 0) >= (rim[b] || 0) ? a : b;
+          const inner = outer === a ? b : a;
+          if (mid === inner || (PARTNER[inner] || []).includes(mid)) { label = outer; core = inner; }
+        }
+        layer.push(core);
+        // Track: a hollow cell whose rim colour says which pieces may cross it.
+        trackColor.push(label === 'track'
+          ? vote([[-.44,0],[.44,0],[0,-.44],[0,.44],[-.44,-.44],[.44,.44],[-.44,.44],[.44,-.44]]
+              .map(([dx, dy]) => classify(at(cx(c) + dx*cw, cy(r) + dy*ch, rad))).filter(k => SOLID.has(k)).concat(['yellow']))
+          : null);
         cls.push(label);
       }
 
@@ -277,19 +339,21 @@ const Detect = (() => {
     // Separate pieces are divided by a dark seam (crates by their orange border); cells of one piece aren't.
     const parent = cls.map((_, i) => i);
     const find = i => parent[i] === i ? i : (parent[i] = find(parent[i]));
-    // A seam is a thin line clearly darker than the faces on both sides of it.
     const lum = ([R, G, B]) => R * 0.3 + G * 0.59 + B * 0.11;
     const joined = (a, b, pts, nx, ny) => {
       if (cls[a] !== cls[b] || NOT_PIECE.has(cls[a]) || cls[a] === 'wall' || lockCell[a] || lockCell[b]) return false;
       if (cls[a] === 'crate') return pts.filter(([x, y]) => ['crate', 'frame'].includes(classify(at(x, y, 1)))).length / pts.length > 0.5;
       const w = Math.max(2, Math.round(0.06 * cw)), side = 0.25 * cw;
-      const seam = pts.filter(([x, y]) => {
+      // Seam: clearly dark over half its length, or a little darker along (almost) all of it —
+      // the 3D edge between two stacked pieces. Stud shadows only darken parts of an inner border.
+      const ratios = pts.map(([x, y]) => {
         let line = Infinity;
         for (let o = -w; o <= w; o++) line = Math.min(line, lum(at(x + nx * o, y + ny * o, 0)));
         const faces = Math.min(lum(at(x - nx * side, y - ny * side, 1)), lum(at(x + nx * side, y + ny * side, 1)));
-        return line < 0.6 * faces;
-      }).length;
-      return seam / pts.length < 0.5;
+        return line / Math.max(1, faces);
+      });
+      const dark = t => ratios.filter(v => v < t).length / ratios.length;
+      return !(dark(0.6) >= 0.5 || dark(0.8) >= 0.9);
     };
     // Skip the middle of each border: icons (keys) sit on a piece's centre, often across a border.
     const along = () => [0.1, 0.15, 0.2, 0.25, 0.3, 0.7, 0.75, 0.8, 0.85, 0.9];
@@ -324,19 +388,19 @@ const Detect = (() => {
       const p = { id: id++, color: hidden ? '?' : label, r, c, h, w, key: false, lock: 0, ice: hidden ? 1 : 0 };
       if (label === 'crate') p.crate = true;
       if (cells.length !== h * w) p.shape = cells.map(i => [Math.floor(i / W) - r, i % W - c]);
+      const cores = cells.map(i => layer[i]).filter(Boolean);
+      const inner = !hidden && cores.length / cells.length >= 0.5 ? vote(cores) : null;
       if (!hidden && h * w === 1 && lockCell[r * W + c]) p.lock = 1;
-      else if (!hidden && label !== 'yellow' && label !== 'orange') {
+      else if (!hidden && !['yellow', 'orange'].includes(label) && !['yellow', 'orange'].includes(inner)) {
         const mx = rect.x + (c + w / 2) * cw, my = rect.y + (r + h / 2) * ch;
-        const spots = [[0,0],[-.12,0],[.12,0],[0,-.12],[0,.12],[-.2,-.1],[.1,.2],[-.1,.2],[.2,-.1]];
-        if (spots.some(([dx, dy]) => gold(at(mx + dx*cw, my + dy*ch, rad)))) p.key = true;
+        // A key: gold with a coloured gem (red or blue) near the piece's centre.
+        const spots = [[0,0],[-.12,0],[.12,0],[0,-.12],[0,.12],[-.2,-.1],[.1,.2],[-.1,.2],[.2,-.1],[.15,-.2],[-.15,.2]]
+          .map(([dx, dy]) => at(mx + dx*cw, my + dy*ch, rad));
+        const gem = ([R, G, B]) => (R > 170 && G < 80) || (label !== 'blue' && label !== 'sky' && B > 170 && R < 90 && G < 170);
+        if (spots.some(gold) && spots.some(gem)) p.key = true;
       }
-      // Layered piece: a different colour runs through the middle of every cell.
-      if (!hidden && !p.key && !p.lock) {
-        const cores = cells.map(i => classify(at(cx(i % W), cy(Math.floor(i / W)), rad * 2)));
-        const core = vote(cores);
-        if (core !== label && REF[core] && !NOT_PIECE.has(core) && !['ice', 'crate'].includes(core)
-            && cores.filter(x => x === core).length / cores.length >= 0.6) p.inner = core;
-      }
+      // Layered piece: most of its cells showed the same second colour inside.
+      if (inner && !p.key && !p.lock) p.inner = inner;
       pieces.push(p);
     };
 
@@ -407,7 +471,9 @@ const Detect = (() => {
     edge('T', W, t => [rect.x + t * cw, rect.y - off * ch]);
     edge('B', W, t => [rect.x + t * cw, rect.y + rect.h + off * ch]);
 
-    return { W, H, walls, pieces, gates, tickPerCell: false };
+    const tracks = [];
+    cls.forEach((l, i) => { if (l === 'track') tracks.push([Math.floor(i / W), i % W, trackColor[i]]); });
+    return { W, H, walls, tracks, pieces, gates, tickPerCell: false };
   }
 
   return { locate, run };

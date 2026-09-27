@@ -89,6 +89,33 @@ const PRESETS = {
       {id: 5, side: "B", start: 4, len: 3, color: "?", frozen: 18},
     ],
   },
+  l205: {
+    W: 7, H: 8, tickPerCell: false, note: 'Level 205 loaded (read from a screenshot).',
+    walls: [],
+    tracks: [[0,0,"yellow"],[0,1,"yellow"],[0,2,"yellow"],[0,3,"yellow"],[0,4,"yellow"],[0,5,"yellow"],[0,6,"yellow"],[1,0,"yellow"],[1,1,"yellow"],[1,2,"yellow"],[1,3,"yellow"],[1,4,"yellow"],[1,5,"yellow"],[1,6,"yellow"],[2,0,"yellow"],[2,6,"yellow"],[3,0,"yellow"],[3,6,"yellow"],[4,0,"yellow"],[4,6,"yellow"],[5,0,"yellow"],[5,6,"yellow"],[6,0,"yellow"],[6,6,"yellow"]],
+    pieces: [
+      {id: 1, color: "yellow", r: 2, c: 1, h: 1, w: 3, key: false, lock: 0, ice: 0},
+      {id: 2, color: "red", r: 2, c: 4, h: 2, w: 2, key: false, lock: 0, ice: 0, inner: "blue"},
+      {id: 3, color: "green", r: 3, c: 1, h: 1, w: 3, key: false, lock: 0, ice: 0, inner: "yellow"},
+      {id: 4, color: "red", r: 4, c: 1, h: 2, w: 2, key: false, lock: 0, ice: 0, shape: [[0,0],[0,1],[1,0]], inner: "yellow"},
+      {id: 5, color: "blue", r: 4, c: 3, h: 2, w: 1, key: false, lock: 0, ice: 0, inner: "red"},
+      {id: 6, color: "yellow", r: 4, c: 4, h: 2, w: 2, key: false, lock: 0, ice: 0},
+      {id: 7, color: "yellow", r: 5, c: 1, h: 2, w: 3, key: false, lock: 0, ice: 0, shape: [[0,1],[1,0],[1,1],[1,2]]},
+      {id: 8, color: "red", r: 6, c: 4, h: 1, w: 2, key: false, lock: 0, ice: 0, inner: "yellow"},
+      {id: 9, color: "yellow", r: 7, c: 0, h: 1, w: 1, key: false, lock: 0, ice: 0},
+      {id: 10, color: "green", r: 7, c: 1, h: 1, w: 1, key: false, lock: 0, ice: 0},
+      {id: 11, color: "yellow", r: 7, c: 2, h: 1, w: 1, key: false, lock: 0, ice: 0},
+      {id: 12, color: "red", r: 7, c: 3, h: 1, w: 2, key: false, lock: 0, ice: 0},
+      {id: 13, color: "yellow", r: 7, c: 5, h: 1, w: 1, key: false, lock: 0, ice: 0},
+      {id: 14, color: "blue", r: 7, c: 6, h: 1, w: 1, key: false, lock: 0, ice: 0},
+    ],
+    gates: [
+      {id: 1, side: "L", start: 7, len: 1, color: "green", frozen: 0},
+      {id: 2, side: "T", start: 2, len: 3, color: "?", frozen: 10},
+      {id: 3, side: "B", start: 1, len: 2, color: "red", frozen: 0},
+      {id: 4, side: "B", start: 4, len: 2, color: "blue", frozen: 0},
+    ],
+  },
   demo: {
     W: 5, H: 4, tickPerCell: false,
     pieces: [
@@ -197,9 +224,15 @@ function render() {
   const { view, step } = currentView();
 
   const walls = new Set((level.walls || []).map(([r, c]) => r + ',' + c));
+  const tracks = new Map((level.tracks || []).map(([r, c, col]) => [r + ',' + c, col]));
   for (let r = 0; r < level.H; r++)
-    for (let c = 0; c < level.W; c++)
-      if (!walls.has(r + ',' + c)) b.appendChild(el('div', 'grid-bg', rectCss(r, c, 1, 1, cs, g, 1)));
+    for (let c = 0; c < level.W; c++) {
+      if (walls.has(r + ',' + c)) continue;
+      const d = el('div', 'grid-bg', rectCss(r, c, 1, 1, cs, g, 1));
+      const t = tracks.get(r + ',' + c);
+      if (t) { d.classList.add('track'); d.style.borderColor = COLORS[t]; }
+      b.appendChild(d);
+    }
 
   for (const gt of view.gates) {
     const d = el('div', 'gate', { ...gateBox(gt, cs, g), background: COLORS[gt.color] });
@@ -264,6 +297,15 @@ function changed() { save(); render(); inspector(); }
 $('board').addEventListener('pointerdown', e => {
   if (sol) { stopPlay(); stepForward(); return; }
   const h = locate(e);
+  if (tool === 'track' && h.inside) {
+    if (!isWall(h.r, h.c)) {
+      const cur = trackAt(h.r, h.c);
+      drag = { kind: 'track', on: cur !== color };
+      paintTrack(h.r, h.c, drag.on);
+      $('board').setPointerCapture(e.pointerId);
+    }
+    return;
+  }
   if (tool === 'wall' && h.inside) {
     if (!pieceAt(h.r, h.c)) {
       const on = !isWall(h.r, h.c);
@@ -300,8 +342,17 @@ $('board').addEventListener('pointerdown', e => {
   if (drag) { $('board').setPointerCapture(e.pointerId); render(); }
 });
 
+const trackAt = (r, c) => ((level.tracks || []).find(([y, x]) => y === r && x === c) || [])[2];
+function paintTrack(r, c, on) {
+  if (isWall(r, c) || (trackAt(r, c) === color) === on) return;
+  level.tracks = (level.tracks || []).filter(([y, x]) => y !== r || x !== c);
+  if (on) level.tracks.push([r, c, color === '?' ? 'yellow' : color]);
+  save(); render();
+}
+
 function paintWall(r, c, on) {
   if (pieceAt(r, c) || isWall(r, c) === on) return;
+  if (on) level.tracks = (level.tracks || []).filter(([y, x]) => y !== r || x !== c);
   level.walls = on ? [...(level.walls || []), [r, c]] : level.walls.filter(([y, x]) => y !== r || x !== c);
   save(); render();
 }
@@ -310,6 +361,7 @@ $('board').addEventListener('pointermove', e => {
   if (!drag) return;
   const h = locate(e);
   if (drag.kind === 'wall') { if (h.inside) paintWall(h.r, h.c, drag.on); return; }
+  if (drag.kind === 'track') { if (h.inside) paintTrack(h.r, h.c, drag.on); return; }
   if (drag.kind === 'draw') { drag.r1 = h.rC; drag.c1 = h.cC; }
   else drag.k1 = drag.side === 'L' || drag.side === 'R' ? h.rC : h.cC;
   render();
@@ -317,7 +369,7 @@ $('board').addEventListener('pointermove', e => {
 
 $('board').addEventListener('pointerup', () => {
   if (!drag) return;
-  if (drag.kind === 'wall') { drag = null; return; }
+  if (drag.kind === 'wall' || drag.kind === 'track') { drag = null; return; }
   if (drag.kind === 'draw') {
     const r = Math.min(drag.r0, drag.r1), c = Math.min(drag.c0, drag.c1);
     const h = Math.abs(drag.r1 - drag.r0) + 1, w = Math.abs(drag.c1 - drag.c0) + 1;
@@ -438,6 +490,7 @@ function resize() {
   level.W = W; level.H = H;
   level.pieces = level.pieces.filter(p => p.r + p.h <= H && p.c + p.w <= W);
   level.walls = (level.walls || []).filter(([r, c]) => r < H && c < W);
+  level.tracks = (level.tracks || []).filter(([r, c]) => r < H && c < W);
   level.gates = level.gates.filter(gt => gt.start + gt.len <= (gt.side === 'L' || gt.side === 'R' ? H : W));
   changed();
 }
@@ -610,42 +663,51 @@ let impRect = null, impDrag = null;
 const img = $('imp-img'), stage = $('imp-stage'), box = $('imp-box');
 
 let pixels = null, lastFound = null;
+const WORK_SIDE = 2000;
 
-function imagePixels() {
+// Decode straight from the file (Safari can quietly downsample a large <img> drawn to a canvas)
+// at a fixed working size, which also keeps detection fast and consistent across phones.
+async function readPixels(blob) {
+  let src = null;
+  try { src = await createImageBitmap(blob); } catch {}
+  if (!src) { await img.decode().catch(() => {}); src = img; }
+  const w0 = src.width || src.naturalWidth, h0 = src.height || src.naturalHeight;
+  const k = Math.min(1, WORK_SIDE / Math.max(w0, h0));
   const cv = document.createElement('canvas');
-  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  cv.width = Math.round(w0 * k); cv.height = Math.round(h0 * k);
   const ctx = cv.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0);
+  ctx.drawImage(src, 0, 0, cv.width, cv.height);
   return ctx.getImageData(0, 0, cv.width, cv.height);
 }
 
-function openImport(blob) {
+async function openImport(blob) {
   closeSolution();
   status('Reading the screenshot…');
-  img.onload = () => {
-    pixels = imagePixels();
-    const found = Detect.locate(pixels);
-    if (found) useBoard(found.rect, found.W, found.H);
-    else showManual("Couldn't find the board by itself. Drag a box over the grid of blocks, inside the frame.");
-  };
   img.src = URL.createObjectURL(blob);
+  pixels = await readPixels(blob);
+  const found = Detect.locate(pixels);
+  lastFound = found;
+  preview(found
+    ? `Found a ${found.W}×${found.H} board. Check the lines sit on the blocks, then tap Use this board. If not, drag a new box over the grid.`
+    : "Couldn't find the board by itself. Drag a box over the grid of blocks, inside the frame.", found);
 }
 
-function showManual(msg, rect, W, H) {
+function preview(msg, found) {
   const last = (() => { try { return JSON.parse(localStorage.getItem('blockout_import_size')); } catch { return null; } })() || [7, 10];
   $('imp-msg').textContent = msg;
-  $('imp-w').value = W || last[0]; $('imp-h').value = H || last[1];
+  $('imp-w').value = found ? found.W : last[0]; $('imp-h').value = found ? found.H : last[1];
   impRect = null; box.hidden = true; $('imp-go').disabled = true;
   $('import').hidden = false; $('editor').hidden = true; $('adjust').hidden = true;
   status('');
-  requestAnimationFrame(() => {
-    if (rect) {
-      const k = img.getBoundingClientRect().width / img.naturalWidth;
-      impRect = { x: rect.x * k, y: rect.y * k, w: rect.w * k, h: rect.h * k };
+  const place = () => {
+    if (found) {
+      const k = img.getBoundingClientRect().width / pixels.width;
+      impRect = { x: found.rect.x * k, y: found.rect.y * k, w: found.rect.w * k, h: found.rect.h * k };
       drawBox(); $('imp-go').disabled = false;
     }
     $('import').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
+  };
+  if (img.complete && img.naturalWidth) requestAnimationFrame(place); else img.onload = () => requestAnimationFrame(place);
 }
 
 function useBoard(rect, W, H) {
@@ -653,13 +715,13 @@ function useBoard(rect, W, H) {
   level = Detect.run(pixels, rect, W, H);
   sel = null; closeImport(); syncInputs(); changed();
   const nums = level.pieces.filter(p => p.ice || p.lock).length + level.gates.filter(gt => gt.frozen).length;
-  status(`Found a ${W}×${H} board: ${level.pieces.length} pieces, ${level.gates.length} exits.` +
+  status(`Read ${level.pieces.length} pieces and ${level.gates.length} exits.` +
     (nums ? ` Now tap each ❄ ice, 📦 crate, 🔒 lock and frozen exit (${nums}) and type its number.` : ''), 'ok');
   $('adjust').hidden = false;
 }
 
 $('adjust').addEventListener('click', () => {
-  if (lastFound) showManual('Adjust the box so it covers exactly the grid of blocks, then Detect.', lastFound.rect, lastFound.W, lastFound.H);
+  if (pixels) preview('Drag a new box over the grid of blocks if the lines are off, then tap Use this board.', lastFound);
 });
 
 $('file').addEventListener('change', e => {
@@ -723,7 +785,7 @@ $('imp-cancel').addEventListener('click', closeImport);
 $('imp-go').addEventListener('click', () => {
   const W = parseInt($('imp-w').value), H = parseInt($('imp-h').value);
   try { localStorage.setItem('blockout_import_size', JSON.stringify([W, H])); } catch {}
-  const k = img.naturalWidth / img.getBoundingClientRect().width;
+  const k = pixels.width / img.getBoundingClientRect().width;
   useBoard({ x: impRect.x * k, y: impRect.y * k, w: impRect.w * k, h: impRect.h * k }, W, H);
 });
 

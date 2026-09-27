@@ -65,6 +65,7 @@ input[type=number] {
   touch-action: none; user-select: none; -webkit-user-select: none;
 }
 .grid-bg { position: absolute; background-color: var(--cell); border-radius: 4px; }
+.grid-bg.track { background-color: #3a3326; border: 3px solid; border-radius: 6px; }
 .pwrap { position: absolute; }
 .pwrap.sel { filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 2px #fff); z-index: 2; }
 .pwrap.moving { z-index: 3; animation: glow 1s infinite; }

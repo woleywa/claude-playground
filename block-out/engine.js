@@ -3,7 +3,8 @@
 //   shape = [[dr, dc], …] cell offsets for non-rectangular pieces (absent = full h×w rectangle)
 //   color '?' = unknown (still under ice / inside a crate); inner = colour left behind when it leaves
 // gate:  { id, side: 'L'|'R'|'T'|'B', start, len, color, frozen }
-// level: { W, H, walls: [[r, c], …], pieces, gates, tickPerCell }
+// level: { W, H, walls: [[r, c], …], tracks: [[r, c, color], …], pieces, gates, tickPerCell }
+//   a track cell only lets pieces of its colour move across it
 // Ice counts down once per piece that leaves (or per cell with tickPerCell);
 // frozen exits count down once per move (every drag, including one that leaves).
 const Engine = (() => {
@@ -31,11 +32,20 @@ const Engine = (() => {
     return g;
   }
 
+  const trackCache = new WeakMap();
+  function trackMap(level) {
+    if (!trackCache.has(level)) trackCache.set(level, new Map((level.tracks || []).map(([r, c, col]) => [r * level.W + c, col])));
+    return trackCache.get(level);
+  }
+
   function fits(level, g, p, r, c) {
+    const tr = trackMap(level);
     for (const [y, x] of cellsOf(p, r, c)) {
       if (y < 0 || x < 0 || y >= level.H || x >= level.W) return false;
       const v = g[y * level.W + x];
       if (v !== -1 && v !== p.id) return false;
+      const t = tr.get(y * level.W + x);
+      if (t && t !== p.color) return false;
     }
     return true;
   }
@@ -62,7 +72,11 @@ const Engine = (() => {
   // nothing sits between any of its cells and that edge.
   function gateFor(level, g, gates, p, r, c) {
     const cells = cellsOf(p, r, c);
-    const free = (y, x) => { const v = g[y * level.W + x]; return v === -1 || v === p.id; };
+    const tr = trackMap(level);
+    const free = (y, x) => {
+      const v = g[y * level.W + x], t = tr.get(y * level.W + x);
+      return (v === -1 || v === p.id) && (!t || t === p.color);
+    };
     for (const gt of gates) {
       if (gt.frozen > 0 || gt.color !== p.color) continue;
       const end = gt.start + gt.len;
