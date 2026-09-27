@@ -82,7 +82,15 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
   icon isn't); colour from the non-pale pixels; starry cells among crate cells are crate (moons).
   Arrow piece = studless face (low gradient texture); axis from how its edges spread vs its box.
   When one side of the frame is all exits, its edge is mirrored and snapped to the other axis's cells.
-- Numbers are not OCR'd — the user types them.
+- Numbers (frozen exits, crates, ice) are read: `glyphs()` cuts the digits out of a box (ink rule per
+  style: warm cream on frozen tiles, white on crate badges, bright cyan on ice), each digit becomes a
+  7×10 bitmap + aspect, matched to `TEMPLATES` (85 digits cut from Levels 198–214 screenshots, style-
+  tagged). To add samples: label a screenshot's counters and regenerate the template string.
+  Frozen tiles are split by counting numbers along a run (warm digit clusters > 0.25 cell apart).
+- A crate fragment without a readable number is merged into the neighbouring crate (preferring the one
+  that becomes a rectangle) — the rim can cut corners off in some resamplings.
+- Padlock needs ≥15% gold in its cell (rockets are mostly red); in icon cells the colour covering most
+  of the cell wins over the corners (a big double rocket can cover them).
 
 ## Testing
 

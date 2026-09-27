@@ -597,7 +597,7 @@ $('solve').addEventListener('click', () => {
   const t0 = performance.now();
   status('Solving…');
   try {
-    worker = new Worker('worker.js?v=14');
+    worker = new Worker('worker.js?v=15');
   } catch {
     setTimeout(() => showResult(Engine.solve(level, 20000), performance.now() - t0), 20);
     return;
@@ -767,9 +767,11 @@ function useBoard(rect, W, H) {
   lastFound = { rect, W, H };
   level = Detect.run(pixels, rect, W, H);
   sel = null; closeImport(); syncInputs(); changed();
-  const nums = level.pieces.filter(p => p.ice || p.lock).length + level.gates.filter(gt => gt.frozen).length;
-  status(`Read ${level.pieces.length} pieces and ${level.gates.length} exits.` +
-    (nums ? ` Now tap each ❄ ice, 📦 crate, 🔒 lock and frozen exit (${nums}) and type its number.` : ''), 'ok');
+  const counters = level.pieces.filter(p => p.ice || p.lock).length + level.gates.filter(gt => gt.frozen).length;
+  const unread = level.pieces.filter(p => (p.ice && !p.read) || p.lock).length + level.gates.filter(gt => gt.frozen && !gt.read).length;
+  status(`Read ${level.pieces.length} pieces and ${level.gates.length} exits` +
+    (counters ? `, and ${counters - unread} of ${counters} numbers` : '') + '.' +
+    (unread ? ` Tap the ${unread} unread one${unread > 1 ? 's' : ''} (❄ ice, 📦 crate, 🔒 lock, frozen exit) to type the number.` : counters ? ' Check them against the game before solving.' : ''), 'ok');
   $('adjust').hidden = false;
 }
 

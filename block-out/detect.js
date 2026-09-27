@@ -291,7 +291,11 @@ const Detect = (() => {
         // A padlock: an icon cell with gold and its red number badge around the middle.
         const near = [[0,0],[0,.18],[.15,.15],[-.15,.15],[0,-.2],[.12,0],[-.12,0],[.1,-.1],[-.1,-.1]]
           .map(([dx, dy]) => at(cx(c) + dx*cw, cy(r) + dy*ch, rad));
+        // A padlock is largely gold (~25% of the cell); a rocket is mostly red with a little gold.
+        let goldN = 0;
+        for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) if (gold(at(cx(c) + (-0.35 + 0.0875 * i) * cw, cy(r) + (-0.35 + 0.0875 * j) * ch, 0))) goldN++;
         const goldHit = m.dist > 45 && (SOLID.has(vote(corners)) || vote(corners) === 'ice') && !['yellow', 'orange'].includes(vote(corners))
+          && goldN / 81 >= 0.15
           && near.some(gold) && near.some(([R, G, B]) => (R > 170 && G < 70 && B < 70) || (!['blue', 'sky'].includes(vote(corners)) && B > 170 && R < 90 && G < 170));
         lockCell.push(goldHit);
         let label = m.dist > 45 ? vote(corners) : m.name;
@@ -331,6 +335,8 @@ const Detect = (() => {
         const starry = creamN / 49 >= 0.12 && faceN > 0 && quad.filter(q => q > 0).length >= 3;
         if (starry) label = nearestSolid(face.map(v => v / faceN));
         starCell.push(starry);
+        // A big icon (double rocket) can cover the corners; the colour covering most of the cell wins.
+        if (m.dist > 45 && !goldHit && top.length && top[0][1] >= 20 && SOLID.has(label) && label !== top[0][0]) label = top[0][0];
         // The core runs through the piece's middle, so it also shows at the cell's centre.
         const mid = vote([[0,0],[.08,0],[-.08,0],[0,.08],[0,-.08]].map(([dx, dy]) => classify(at(cx(c) + dx*cw, cy(r) + dy*ch, rad))));
         if (!starry && !goldHit && label !== 'track' && top.length >= 2 && top[1][1] >= 6 && !(PARTNER[top[0][0]] || []).includes(top[1][0])) {
@@ -651,12 +657,137 @@ const Detect = (() => {
     edge('T', W, (t, d = 0.4) => [rect.x + t * cw, rect.y - d * ch]);
     edge('B', W, (t, d = 0.4) => [rect.x + t * cw, rect.y + rect.h + d * ch]);
 
+    // Counters: frozen exits, crates and ice show their number.
+    for (const gt of gates) {
+      if (!gt.frozen) continue;
+      const a0 = gt.start, a1 = gt.start + gt.len;
+      const box = gt.side === 'L' ? [rect.x - 0.95 * cw, rect.y + a0 * ch, rect.x, rect.y + a1 * ch]
+        : gt.side === 'R' ? [rect.x + rect.w, rect.y + a0 * ch, rect.x + rect.w + 0.95 * cw, rect.y + a1 * ch]
+        : gt.side === 'T' ? [rect.x + a0 * cw, rect.y - 0.95 * ch, rect.x + a1 * cw, rect.y]
+        : [rect.x + a0 * cw, rect.y + rect.h, rect.x + a1 * cw, rect.y + rect.h + 0.95 * ch];
+      const n = readNumber(img, ...box, 'g');
+      if (n) { gt.frozen = n; gt.read = true; }
+    }
+    for (const p of pieces) {
+      if (!p.ice) continue;
+      const mx = rect.x + (p.c + p.w / 2) * cw, my = rect.y + (p.r + p.h / 2) * ch;
+      const n = readNumber(img, mx - 0.45 * cw, my - 0.45 * ch, mx + 0.45 * cw, my + 0.45 * ch, p.crate ? 'c' : 'i');
+      if (n) { p.ice = n; p.read = true; }
+    }
+
+    // Every crate shows its number; a numberless crate fragment (a corner cut off by the rim)
+    // belongs to the crate it touches.
+    const cellsOfP = p => p.shape ? p.shape.map(([a, b]) => [p.r + a, p.c + b]) : [...Array(p.h * p.w).keys()].map(i => [p.r + Math.floor(i / p.w), p.c + i % p.w]);
+    for (let again = true; again;) {
+      again = false;
+      for (const frag of pieces.filter(p => p.crate && !p.read)) {
+        const mine = cellsOfP(frag);
+        // Crates are rectangles: prefer the neighbour that becomes one, else the longest shared border.
+        const touching = p => cellsOfP(p).reduce((n, [r, c]) => n + mine.filter(([y, x]) => Math.abs(y - r) + Math.abs(x - c) === 1).length, 0);
+        const rectAfter = p => {
+          const u = [...cellsOfP(p), ...mine];
+          const h = Math.max(...u.map(q => q[0])) - Math.min(...u.map(q => q[0])) + 1, w = Math.max(...u.map(q => q[1])) - Math.min(...u.map(q => q[1])) + 1;
+          return u.length === h * w;
+        };
+        const host = pieces.filter(p => p !== frag && p.crate && p.read && touching(p) > 0)
+          .sort((a, b) => (rectAfter(b) - rectAfter(a)) || (touching(b) - touching(a)))[0];
+        if (!host) continue;
+        const all = [...cellsOfP(host), ...mine];
+        const r0 = Math.min(...all.map(q => q[0])), c0 = Math.min(...all.map(q => q[1]));
+        host.r = r0; host.c = c0;
+        host.h = Math.max(...all.map(q => q[0])) - r0 + 1; host.w = Math.max(...all.map(q => q[1])) - c0 + 1;
+        if (all.length === host.h * host.w) delete host.shape; else host.shape = all.map(([y, x]) => [y - r0, x - c0]);
+        pieces.splice(pieces.indexOf(frag), 1);
+        again = true;
+        break;
+      }
+    }
+
     const tracks = [];
     cls.forEach((l, i) => { if (l === 'track') tracks.push([Math.floor(i / W), i % W, trackColor[i]]); });
     return { W, H, walls, tracks, pieces, gates, tickPerCell: false };
   }
 
-  return { locate, run };
+  // Digit templates cut from real screenshots: digit, style (g = frozen exit, c = crate badge,
+  // i = ice), aspect ×100, then the 7×10 bitmap as hex.
+  const TEMPLATES = '5g0687efdc38fcfc3a7fff8 5g0687fff870fcfc3effff8 5g0687eff878fcfc3fffff8 1g0553ffff8f1e3c78f1e3c 3g0657dfc38f3c7c3affff8 1g0523ffff8f1e3c78f1e3c 4g0791c78f3e6d9bfff1c18 1g0523ffff8f1e3c78f1e3c 4g0821c78f3e6d9bfff1c18 1g0533ffff8f1e3c78f1e3c 6g0713871c78fdff9f77e78 2i085001c38e1871c7efffc 4i1162cd9366cdfff8e0c18 3i0900818f3c1c1c38ffef8 2i0890e1c38e3861c7ffffc 3i0890c38f1e1e1c3effdf0 4i10508d9b66cdfffff0c18 3i0890e18f1e0e1c3effdf8 6i09541c3f7fe78f1f37e78 3i0900818f3c1c1c38ffff8 8i100c4f8e3ec78f1e3fef8 4i1102cd9366cdfff860c18 0i095018f1e3c78f1f77c70 1i030fffffffffffffffffc 6i09561c3f77c78f1f77c78 1i030fefffffffffffffffc 4i10524d9366cdfffff0c18 1i032ffffffffdfbf7efdf8 4i10020d9b66cd9ffff0c18 1i032fffffffffffffffffc 3i0900c18f1c1c1c3affef8 5i09040c1f3f0e1c3e7fdf8 1g0481ffffbf0e1c3870e1c 2g061fffc7871e79e7ffffc 5g0707cf9c387cfc3bffff8 1g0523ffffaf0e1c3870e1c 8g0747dfb37e7dfb3f7fef0 9c07679fbff7fefc78f7df0 1c06738f3e7c3870e1cfffc 5c071fdfb87cfdfc3affff8 1g0501ffffaf1e3c78f1e3c 0g0767cfbfe7c78f1f77cf8 7g062fffc78f1c78e3c70e0 7g065fffc78e1c78e3c70e0 4g0761c78f3e6d9bfff1c18 7g065fffc7871c78e3c70e0 7c074fffc78e1c70e3871c0 7g065fffc7871c38e1c70e0 1g0521ffffaf1e3c78f1e3c 0g0767cfbfe7c78f3f7fcf0 8g0767dfbbfe7dff3f7fef8 3g0667dfc7873c783a7fff8 3g0637dfc78f7c7c3affff8 8g0747dffbff7cff9f3fef8 9g0697dff3e7fefc78e3860 1g0501ffffaf0e1c3870e1c 8g0717dffbff7cff1f7fef8 2g0657dfdf871e79e7cfffc 1g0523ffff8f1e3c78f1e3c 9g0697dff3e7fefc78e3860 2g0637dfdf871e38e7ffffc 9g0697dffbe7eefc78e3c70 1g0521ffff8f1e3c78f1e3c 0g0777cffbf7cf9fbf7fef8 1g0501ffffef1e3c78f1e3c 2g0637dfdf870e38e7cfffc 3c069fdf8f1c7c7c3fffcf0 1i0333efdfbfffffffffefc 1g0501ffffef1e3c78f1e3c 3g0667dfc38f3c7c3affef8 8g0767dfbbbe7cff3f7fef8 6c0753ef9c7cfddfbff7e78 1c07238f3e7c3870e3efffc 0c0787cfbff7efdfbff7c70 5g0667eff870fefc3effff0 1g0521ffffaf1e3c38f1e3c 1g0501ffffef1e3c78f1e3c 8g0747dfbbfe7cff3e7fef8 1g0523ffffaf1e3c78f1e3c 3g0637dfd7877c7c387fff8 1c06638f3e7c3870e7ffffc 1c06938f3e7c3870e3efffc 1c06638f3e7c3870e7ffffc 5c072fdfbe7cfcfc3fffff8 5c069fdfff7cfcfc3fffff8'.split(' ').map(t => {
+    const bits = [];
+    for (const ch of t.slice(5)) { const v = parseInt(ch, 16); for (let j = 3; j >= 0; j--) bits.push((v >> j) & 1); }
+    return { d: t[0], style: t[1], aspect: +t.slice(2, 5) / 100, bits: bits.slice(0, 70) };
+  });
+  const lumOf = v => v[0] * 0.3 + v[1] * 0.59 + v[2] * 0.11;
+  const INK = {
+    g: v => v[0] > v[2] + 10 && lumOf(v) > 185,                  // cream digits on frozen exits
+    c: v => lumOf(v) > 200 && Math.max(...v) - Math.min(...v) < 70, // white digits on crate badges
+    i: v => v[1] > 195 && v[2] > 215 && v[0] < 110,               // bright cyan digits on ice
+  };
+  // Read the number in a box, or null when nothing digit-like is there.
+  function readNumber(img, x0, y0, x1, y1, style) {
+    const gl = glyphs(img, x0, y0, x1, y1, INK[style]);
+    if (!gl.length || gl.length > 2) return null;
+    let s = '';
+    for (const g of gl) {
+      let best = null;
+      for (const t of TEMPLATES) {
+        let d = 40 * Math.abs(t.aspect - g.aspect) + (t.style === style ? 0 : 6);
+        for (let i = 0; i < 70; i++) if (t.bits[i] !== g.bits[i]) d++;
+        if (!best || d < best.d) best = { d, t };
+      }
+      if (!best || best.d > 24) return null;
+      s += best.t.d;
+    }
+    return +s || null;
+  }
+
+  // Numbers: the digits inside a box, as small bitmaps (one per digit, left to right).
+  // `ink(v)` says which pixels belong to a digit's fill.
+  function glyphs(img, x0, y0, x1, y1, ink) {
+    const at = sampler(img);
+    x0 = Math.max(0, Math.round(x0)); y0 = Math.max(0, Math.round(y0));
+    x1 = Math.min(img.width - 1, Math.round(x1)); y1 = Math.min(img.height - 1, Math.round(y1));
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    if (w < 4 || h < 4) return [];
+    const m = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) m[y * w + x] = ink(at(x0 + x, y0 + y, 0)) ? 1 : 0;
+    // Keep only sizeable blobs (digits), dropping specks and the box edges.
+    const seen = new Int32Array(w * h).fill(-1), blobs = [];
+    for (let i = 0; i < w * h; i++) {
+      if (!m[i] || seen[i] >= 0) continue;
+      const q = [i], id = blobs.length; seen[i] = id;
+      let bx0 = w, by0 = h, bx1 = 0, by1 = 0;
+      for (let k = 0; k < q.length; k++) {
+        const j = q[k], x = j % w, y = (j / w) | 0;
+        bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); by0 = Math.min(by0, y); by1 = Math.max(by1, y);
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const xx = x + dx, yy = y + dy, jj = yy * w + xx;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h || !m[jj] || seen[jj] >= 0) continue;
+          seen[jj] = id; q.push(jj);
+        }
+      }
+      blobs.push({ id, n: q.length, bx0, by0, bx1, by1 });
+    }
+    const inside = blobs.filter(b => b.n >= 12 && b.bx0 > 0 && b.bx1 < w - 1 && b.by0 > 0 && b.by1 < h - 1);
+    const tall = Math.max(0, ...inside.map(b => b.by1 - b.by0 + 1));
+    // Digits of one number share a height and a baseline.
+    const keep = inside.filter(b => b.by1 - b.by0 + 1 >= 0.7 * tall);
+    keep.sort((a, b) => a.bx0 - b.bx0);
+    const GW = 7, GH = 10;
+    return keep.map(b => {
+      const bw = b.bx1 - b.bx0 + 1, bh = b.by1 - b.by0 + 1, bits = [];
+      for (let gy = 0; gy < GH; gy++)
+        for (let gx = 0; gx < GW; gx++) {
+          let on = 0, tot = 0;
+          for (let y = b.by0 + Math.floor(gy * bh / GH); y < b.by0 + Math.ceil((gy + 1) * bh / GH); y++)
+            for (let x = b.bx0 + Math.floor(gx * bw / GW); x < b.bx0 + Math.ceil((gx + 1) * bw / GW); x++) {
+              tot++; if (seen[y * w + x] === b.id) on++;
+            }
+          bits.push(on / Math.max(1, tot) > 0.4 ? 1 : 0);
+        }
+      return { bits, aspect: bw / bh, x: x0 + b.bx0, w: bw, h: bh };
+    });
+  }
+
+  return { locate, run, glyphs };
 })();
 
 if (typeof module !== 'undefined') module.exports = Detect;
