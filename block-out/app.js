@@ -597,7 +597,7 @@ $('solve').addEventListener('click', () => {
   const t0 = performance.now();
   status('Solving…');
   try {
-    worker = new Worker('worker.js?v=13');
+    worker = new Worker('worker.js?v=14');
   } catch {
     setTimeout(() => showResult(Engine.solve(level, 20000), performance.now() - t0), 20);
     return;

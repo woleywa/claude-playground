@@ -25,7 +25,7 @@ const Detect = (() => {
   const SOLID = new Set(['pink', 'yellow', 'sky', 'lime', 'blue', 'purple', 'green', 'red', 'orange']);
   // Colour pairs that shading alone can produce inside one plain piece.
   const PARTNER = { yellow: ['orange'], orange: ['yellow', 'red'], red: ['orange', 'pink'], pink: ['red', 'purple'],
-    blue: ['sky', 'purple'], sky: ['blue'], green: ['lime'], lime: ['green'], purple: ['pink', 'blue'] };
+    blue: ['sky'], sky: ['blue'], green: ['lime'], lime: ['green'], purple: ['pink'] };
   const FRAME = hex('4a41aa');
   const dist = (a, b) => Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2);
 
@@ -266,7 +266,7 @@ const Detect = (() => {
 
     // Cell colour = average over most of the cell. An icon (padlock, crate badge) skews the
     // average away from every reference; then the corners, which it doesn't cover, decide.
-    const cls = [], odd = [], lockCell = [], layer = [], trackColor = [], starCell = [];
+    const cls = [], odd = [], lockCell = [], layer = [], trackColor = [], starCell = [], cornerCls = [];
     // Star outlines are pale and unsaturated (cream on warm pieces, near-white on blue).
     const cream = v => { const mx = Math.max(...v), mn = Math.min(...v); return mx - mn < 110 && ((v[0] > 120 && v[1] > 90 && v[0] >= v[2]) || mn > 110); };
     const creamCount = (x0, y0) => {
@@ -296,7 +296,12 @@ const Detect = (() => {
         lockCell.push(goldHit);
         let label = m.dist > 45 ? vote(corners) : m.name;
         if (goldHit && label === 'ice') label = 'blue';
-        if (m.name === 'track' && m.dist < 25 && !(creamCount(cx(c), cy(r)) >= 0.12)) label = 'track';
+        // Track: hollow, so the middle shows the olive floor (an icon cell can average to it too).
+        const middle = at(cx(c), cy(r), rad * 2);
+        if (m.name === 'track') {
+          if (m.dist < 25 && !(creamCount(cx(c), cy(r)) >= 0.12) && nearest(middle).name === 'track') label = 'track';
+          else label = vote(corners);
+        }
 
         // Layered piece: two unrelated colours each cover a good part of the cell; the one along
         // the cell's border is the outer layer, the other is the core.
@@ -341,6 +346,7 @@ const Detect = (() => {
               .map(([dx, dy]) => classify(at(cx(c) + dx*cw, cy(r) + dy*ch, rad))).filter(k => SOLID.has(k)).concat(['yellow']))
           : null);
         cls.push(label);
+        cornerCls.push(vote(corners));
       }
 
     // Cells outside the board (e.g. a staircase edge) are background reachable from the
@@ -397,6 +403,7 @@ const Detect = (() => {
       if (crates >= 2) { cls[i] = 'crate'; starCell[i] = false; }
     }
     // A crate's number badge makes its cell look like something else; it belongs to the crate.
+    const badge = new Uint8Array(W * H);
     for (let i = 0; i < W * H; i++) {
       if ((!odd[i] && cls[i] !== 'wall') || cls[i] === 'crate') continue;
       const r = Math.floor(i / W), c = i % W;
@@ -406,6 +413,8 @@ const Detect = (() => {
       }).length;
       if (nb >= 3) {
         cls[i] = 'crate';
+        // The badge is a small square in the middle; the cell's corners still show crate planks.
+        if (['crate', 'frame'].includes(cornerCls[i])) badge[i] = 1;
         const k = walls.findIndex(([wr, wc]) => wr === r && wc === c);
         if (k >= 0) walls.splice(k, 1);
       }
@@ -418,7 +427,7 @@ const Detect = (() => {
     const joined = (a, b, pts, nx, ny) => {
       if (cls[a] !== cls[b] || NOT_PIECE.has(cls[a]) || cls[a] === 'wall') return false;
       if (cls[a] !== 'crate' && (lockCell[a] || lockCell[b])) return false;
-      if (cls[a] === 'crate' && (odd[a] || odd[b])) return true; // the number badge is part of its crate
+      if (cls[a] === 'crate' && (badge[a] || badge[b])) return true; // the number badge is part of its crate
       if (cls[a] === 'crate') return pts.filter(([x, y]) => ['crate', 'frame'].includes(classify(at(x, y, 1)))).length / pts.length > 0.5;
       // Star outlines make the inside of a star piece busy; only a navy gap separates two of them.
       if (starCell[a] && starCell[b]) return pts.filter(([x, y]) => { const [R, G, B] = at(x, y, 1); return R + G + B < 230 && B >= Math.max(R, G); }).length / pts.length < 0.5;
@@ -597,21 +606,28 @@ const Detect = (() => {
       for (let k = 1; k + 1 < n; k++)
         if (kinds[k] && kinds[k - 1] && kinds[k - 1] === kinds[k + 1] && kinds[k] !== kinds[k - 1] && (PARTNER[kinds[k - 1]] || []).includes(kinds[k]))
           kinds[k] = kinds[k - 1];
-      // Neighbouring frozen tiles are separated by a strip of frame; one long tile isn't
-      // (its number may sit right on the cell border, so look for the frame, not for ice).
-      const lumG = v => v[0] * 0.3 + v[1] * 0.59 + v[2] * 0.11;
-      // Only near the tile's inner and outer edges: a tile's number sits in the middle of it.
-      const gap = t => [0.06, 0.12, 0.62, 0.7].filter(d => {
-        let low = Infinity;
-        for (let o = -0.05; o <= 0.051; o += 0.01) low = Math.min(low, lumG(at(...pos(t + o, d), 0)));
-        return low < 130;
-      }).length >= 3;
+      // Each frozen tile shows one number in its middle, drawn in warm colours on cool ice. Along a
+      // run of frozen cells, clusters of warm pixels (digits of one number sit close together) tell
+      // how many tiles there are; tiles are split midway between numbers.
+      const warm = v => v[0] > v[2] + 10;
+      const tileCuts = (k0, k1) => {
+        const clusters = [];
+        for (let t = k0; t <= k1 + 1.001; t += 0.04) {
+          if (![0.3, 0.4, 0.5, 0.6].some(d => warm(at(...pos(t, d), 0)))) continue;
+          const last = clusters[clusters.length - 1];
+          if (last && t - last.end <= 0.25) last.end = t; else clusters.push({ start: t, end: t });
+        }
+        return clusters.slice(1).map((c, i) => Math.round(((clusters[i].start + clusters[i].end) / 2 + (c.start + c.end) / 2) / 2));
+      };
       for (let k = 0; k < n; k++) {
         const l = kinds[k];
         if (!l) continue;
         let e = k;
-        // Frozen tiles sit side by side; one tile spanning several cells has no gap between them.
-        while (e + 1 < n && kinds[e + 1] === l && (l !== 'frozen' || !gap(e + 1))) e++;
+        while (e + 1 < n && kinds[e + 1] === l) e++;
+        if (l === 'frozen') {
+          const cut = tileCuts(k, e).find(x => x > k && x <= e);
+          if (cut !== undefined) e = cut - 1;
+        }
         const gt = { id: gid++, side, start: k, len: e - k + 1, color: l === 'frozen' ? '?' : l, frozen: l === 'frozen' ? 1 : 0 };
         // Star exit: pale star shapes on the exit away from its middle arrow.
         if (l !== 'frozen') {
