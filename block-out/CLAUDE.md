@@ -100,6 +100,17 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
   colour is that piece.
 - Inner exit = a flat (low texture) 1×1 piece with ≥3% white pixels and exactly one open neighbour
   (others are walls or off the board) → becomes a wall cell + a gate with `at`, facing that neighbour.
+  (Level 216) Now: a straight bar of 1–3 cells, both ends walled, ≥1% pure-white pixels (pieces show
+  none; texture didn't separate them); the way out comes from the white arrow's narrow end (`arrowDir`).
+  Frozen cells inside the board are inner frozen exits, facing the side with pieces; number read as 'g'.
+  Small empty pockets closed in by walls/exits become walls.
+- Purple (non-olive) tracks: smooth cell (lum sd < 12), ring mostly one piece colour, centre not a piece
+  colour. Wall flood stops at cells with ≥5 rim-coloured samples (crate rims), so a crate that touches
+  walls stays a crate. Plank cells with more crate than frame samples are crate, not frame.
+- Seams: for piece colours, only border points with the piece colour 0.2 cell to both sides count
+  (a battery on the border hid the seam's absence); with <3 such points the cells join.
+- locate(): a finer multiple lattice also wins when the coarse one is impure (<0.8) and the finer is
+  ≥0.07 purer with ≥60% of the seam score (a big seamless crate favoured 4×5 over 8×10).
 
 ## Testing
 
@@ -113,4 +124,6 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
 - "Level 205" preset (top exit 10) → 10 pieces out, then the top exit thaws with an unknown colour.
 - Level 215 → 7×8: crates 13 / 11, inner purple ▲ exit at r4 c6, frozen 9 / 3 / 1; 46 moves, 3 out, then a
   screenshot (two frozen exits thawed).
+- Level 216 → 8×10: 8×4 crate 5, purple track 2×3, inner exits sky ▼ / blue ▼ (2 wide) / frozen 1;
+  13 moves, blue out, then a screenshot (the inner frozen exit thawed).
 - Importing the Level 198 / 204 / 205 screenshots: 7×10 (31 pieces, 11 exits) / 7×10 (14, 5) / 7×8 (14, 4 + 24 tracks).

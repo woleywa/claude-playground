@@ -252,7 +252,10 @@ const Detect = (() => {
     const base = cands.reduce((a, b) => b.fit > a.fit ? b : a);
     // A lattice with twice the columns contains every true line too; only prefer it when its
     // seams score about as well, and never prefer an unrelated count.
-    const pick = cands.filter(c => c.n % base.n === 0 && c.score >= 0.8 * base.score).sort((a, b) => b.n - a.n)[0];
+    // A big crate has no seams inside, which favours too coarse a lattice; that one cuts across
+    // pieces, though, so a finer one that is clearly purer also wins.
+    const pick = cands.filter(c => c.n % base.n === 0 && (c.score >= 0.8 * base.score
+      || (base.purity < 0.8 && c.purity >= base.purity + 0.07 && c.score >= 0.6 * base.score))).sort((a, b) => b.n - a.n)[0];
 
     return { rect: mirX || mirY ? pick.rect : { x: gx0, y: gy0, w: Wg, h: Hg }, W: pick.n, H: pick.m };
   }
@@ -266,7 +269,7 @@ const Detect = (() => {
 
     // Cell colour = average over most of the cell. An icon (padlock, crate badge) skews the
     // average away from every reference; then the corners, which it doesn't cover, decide.
-    const cls = [], odd = [], lockCell = [], layer = [], trackColor = [], starCell = [], cornerCls = [];
+    const cls = [], odd = [], lockCell = [], layer = [], trackColor = [], starCell = [], cornerCls = [], rimN = [];
     // Star outlines are pale and unsaturated (cream on warm pieces, near-white on blue).
     const cream = v => { const mx = Math.max(...v), mn = Math.min(...v); return mx - mn < 110 && ((v[0] > 120 && v[1] > 90 && v[0] >= v[2]) || mn > 110); };
     const creamCount = (x0, y0) => {
@@ -332,13 +335,13 @@ const Detect = (() => {
         let core = null;
         // Star piece: cream star outlines over the piece colour; the colour is the strongest one.
         // Stars fill all four quarters of a cell; an icon (battery) sits in the middle.
-        const starry = creamN / 49 >= 0.12 && faceN > 0 && quad.filter(q => q > 0).length >= 3;
+        const starry = m.name !== 'frozen' && creamN / 49 >= 0.12 && faceN > 0 && quad.filter(q => q > 0).length >= 3;
         if (starry) label = nearestSolid(face.map(v => v / faceN));
         starCell.push(starry);
         // Narrow crates: the gold/red rim covers a cell's corners, but planks fill much of it.
         const planks = (hist.crate || 0) + (hist.frame || 0);
         const rimOnly = Object.keys(hist).every(k => !SOLID.has(k) || ['yellow', 'orange', 'red'].includes(k));
-        if (planks >= 15 && rimOnly && !goldHit) label = 'frame';
+        if (planks >= 15 && rimOnly && !goldHit) label = (hist.crate || 0) >= (hist.frame || 0) ? 'crate' : 'frame';
         // An icon (battery) can average out to the frame colour; the piece still shows all round it.
         const cv = vote(corners);
         if (['frame', 'crate'].includes(label) && SOLID.has(cv) && !['yellow', 'orange', 'red'].includes(cv) && top.length && top[0][0] === cv && top[0][1] >= 15) label = cv;
@@ -352,9 +355,24 @@ const Detect = (() => {
           const inner = outer === a ? b : a;
           if (mid === inner || (PARTNER[inner] || []).includes(mid)) { label = outer; core = inner; }
         }
+        // Hollow track in a piece colour (e.g. purple): a thin outline of that colour around a flat,
+        // dim floor; the whole cell is smooth, unlike a piece (studs) or a crate (planks).
+        let hollow = null;
+        if (!starry && !goldHit && top.length && label !== 'track') {
+          let s1 = 0, s2 = 0;
+          for (let a = 0; a < 8; a++) for (let b = 0; b < 8; b++) {
+            const v = at(cx(c) + (-0.35 + 0.1 * a) * cw, cy(r) + (-0.35 + 0.1 * b) * ch, 0);
+            const L = v[0] * 0.3 + v[1] * 0.59 + v[2] * 0.11; s1 += L; s2 += L * L;
+          }
+          const sd = Math.sqrt(Math.max(0, s2 / 64 - (s1 / 64) ** 2));
+          const ringTop = Object.entries(rim).filter(([k]) => SOLID.has(k)).sort((a, b) => b[1] - a[1])[0];
+          if (sd < 12 && ringTop && ringTop[1] >= 10 && !SOLID.has(classify(middle))) hollow = ringTop[0];
+        }
+        if (hollow) { label = 'track'; core = null; }
         layer.push(core);
+        rimN.push((hist.yellow || 0) + (hist.orange || 0) + (hist.red || 0));
         // Track: a hollow cell whose rim colour says which pieces may cross it.
-        trackColor.push(label === 'track'
+        trackColor.push(hollow ? hollow : label === 'track'
           ? vote([[-.44,0],[.44,0],[0,-.44],[0,.44],[-.44,-.44],[.44,.44],[-.44,.44],[.44,-.44]]
               .map(([dx, dy]) => classify(at(cx(c) + dx*cw, cy(r) + dy*ch, rad))).filter(k => SOLID.has(k)).concat(['yellow']))
           : null);
@@ -382,7 +400,8 @@ const Detect = (() => {
       const i = q.pop(), r = Math.floor(i / W), c = i % W;
       for (const [dr, dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
         const nr = r + dr, nc = c + dc, j = nr * W + nc;
-        if (nr < 0 || nc < 0 || nr >= H || nc >= W || isWall[j] || cls[j] !== 'frame') continue;
+        // A crate's gold/red rim stops the wall from spreading into the crate.
+        if (nr < 0 || nc < 0 || nr >= H || nc >= W || isWall[j] || cls[j] !== 'frame' || rimN[j] >= 5) continue;
         isWall[j] = 1; q.push(j);
       }
     }
@@ -444,6 +463,11 @@ const Detect = (() => {
       if (cls[a] === 'crate') return pts.filter(([x, y]) => ['crate', 'frame'].includes(classify(at(x, y, 1)))).length / pts.length > 0.5;
       // Star outlines make the inside of a star piece busy; only a navy gap separates two of them.
       if (starCell[a] && starCell[b]) return pts.filter(([x, y]) => { const [R, G, B] = at(x, y, 1); return R + G + B < 230 && B >= Math.max(R, G); }).length / pts.length < 0.5;
+      // An icon (battery) sitting on the border hides the seam: only judge points with the piece's
+      // colour on both sides of the line.
+      const own = k => k === cls[a] || (PARTNER[cls[a]] || []).includes(k);
+      if (SOLID.has(cls[a])) pts = pts.filter(([x, y]) => own(classify(at(x - nx * 0.2 * cw, y - ny * 0.2 * ch, 1))) && own(classify(at(x + nx * 0.2 * cw, y + ny * 0.2 * ch, 1))));
+      if (pts.length < 3) return true;
       const w = Math.max(2, Math.round(0.06 * cw)), side = 0.25 * cw;
       // Studs repeat twice per cell, so inside a piece a cell border looks just like the line
       // through the middle of a cell. A seam between two pieces is darker than those mid-lines.
@@ -664,32 +688,98 @@ const Detect = (() => {
     edge('T', W, (t, d = 0.4) => [rect.x + t * cw, rect.y - d * ch]);
     edge('B', W, (t, d = 0.4) => [rect.x + t * cw, rect.y + rect.h + d * ch]);
 
-    // Inner exits: a flat one-cell block with a white arrow, set into a wall so that it faces a
-    // single open cell. Pieces leave through it from that cell (e.g. ▲ above an empty cell).
+    // Inner exits: a flat bar (one cell thick) with a white arrow, set into a wall (both ends walled).
+    // The arrow gives the way out: ▼ = pieces from the cell above leave downward through it.
     const wallAt = (r, c) => r < 0 || c < 0 || r >= H || c >= W || walls.some(([y, x]) => y === r && x === c);
+    const freeAt = (r, c) => r >= 0 && c >= 0 && r < H && c < W && !wallAt(r, c);
+    // Which way the white arrow in a box points: the narrow end of the triangle.
+    const arrowDir = (x0, y0, x1, y1) => {
+      const pts = [];
+      for (let y = y0; y < y1; y += 1) for (let x = x0; x < x1; x += 1) if (Math.min(...at(x, y, 0)) > 200) pts.push([x, y]);
+      if (pts.length < 12) return null;
+      const spread = (sel, k) => { const v = pts.filter(sel).map(q => q[k]); if (v.length < 3) return 0; const m = v.reduce((a, b) => a + b, 0) / v.length; return Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / v.length); };
+      const ys = pts.map(q => q[1]), xs = pts.map(q => q[0]);
+      const my = (Math.min(...ys) + Math.max(...ys)) / 2, mx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const top = spread(q => q[1] < my, 0), bot = spread(q => q[1] >= my, 0);
+      const lef = spread(q => q[0] < mx, 1), rig = spread(q => q[0] >= mx, 1);
+      const v = Math.max(top, bot) / Math.max(1, Math.min(top, bot)), h = Math.max(lef, rig) / Math.max(1, Math.min(lef, rig));
+      if (Math.max(v, h) < 1.3) return null;
+      return v >= h ? (top < bot ? 'T' : 'B') : (lef < rig ? 'L' : 'R');
+    };
+    // Cells in front of a bar for a way out, and its two ends.
+    const front = (r, c, h, w, side) => side === 'T' ? [...Array(w).keys()].map(k => [r + h, c + k]) : side === 'B' ? [...Array(w).keys()].map(k => [r - 1, c + k])
+      : side === 'L' ? [...Array(h).keys()].map(k => [r + k, c + w]) : [...Array(h).keys()].map(k => [r + k, c - 1]);
+    const ends = (r, c, h, w) => h === 1 ? [[r, c - 1], [r, c + w]] : [[r - 1, c], [r + h, c]];
+    const innerGate = (r, c, h, w, side, color, frozen) => {
+      const flat = side === 'L' || side === 'R';
+      const gt = { id: gid++, side, start: flat ? r : c, len: flat ? h : w, at: side === 'T' ? r + h : side === 'B' ? r - 1 : side === 'L' ? c + w : c - 1, color, frozen };
+      gates.push(gt);
+      for (let y = r; y < r + h; y++) for (let x = c; x < c + w; x++) walls.push([y, x]);
+      return gt;
+    };
     for (const p of [...pieces]) {
-      if (p.h !== 1 || p.w !== 1 || p.ice || p.lock || p.key || p.star || p.color === '?') continue;
-      const { r, c } = p;
-      const open = [[1, 0, 'T'], [-1, 0, 'B'], [0, 1, 'L'], [0, -1, 'R']].filter(([dr, dc]) => !wallAt(r + dr, c + dc));
-      if (open.length !== 1) continue;
-      let white = 0, tot = 0, tex = 0;
-      for (let a = 0; a < 12; a++) for (let b = 0; b < 12; b++) {
-        const x = rect.x + (c + 0.1 + 0.8 * a / 11) * cw, y = rect.y + (r + 0.1 + 0.8 * b / 11) * ch;
+      if ((p.h !== 1 && p.w !== 1) || p.h * p.w > 3 || p.shape || p.ice || p.lock || p.key || p.star || p.color === '?') continue;
+      const { r, c, h, w } = p;
+      if (!ends(r, c, h, w).every(([y, x]) => wallAt(y, x))) continue;
+      let white = 0, tot = 0;
+      for (let a = 0; a < 12 * w; a++) for (let b = 0; b < 12 * h; b++) {
+        const x = rect.x + (c + (0.1 + 0.8 * (a % 12) / 11) + Math.floor(a / 12)) * cw, y = rect.y + (r + (0.1 + 0.8 * (b % 12) / 11) + Math.floor(b / 12)) * ch;
         const v = at(x, y, 0); tot++;
         if (Math.min(...v) > 200) white++;
-        tex += Math.abs(lum(at(x + 2, y, 0)) - lum(at(x - 2, y, 0))) + Math.abs(lum(at(x, y + 2, 0)) - lum(at(x, y - 2, 0)));
       }
-      // Studded pieces are busy all over; an exit is a plain face with a small white arrow.
-      if (white / tot < 0.03 || tex / tot > 25) continue;
-      const [dr, dc, side] = open[0];
-      gates.push({ id: gid++, side, start: side === 'L' || side === 'R' ? r : c, len: 1, at: side === 'L' || side === 'R' ? c + dc : r + dr, color: p.color, frozen: 0 });
+      // Pieces show no pure white; an exit carries a small white arrow.
+      if (white / tot < 0.01) continue;
+      const mx = rect.x + (c + w / 2) * cw, my = rect.y + (r + h / 2) * ch;
+      const side = arrowDir(Math.round(mx - 0.45 * cw), Math.round(my - 0.45 * ch), Math.round(mx + 0.45 * cw), Math.round(my + 0.45 * ch));
+      if (!side || ((side === 'T' || side === 'B') ? h !== 1 : w !== 1)) continue;
+      if (!front(r, c, h, w, side).every(([y, x]) => freeAt(y, x))) continue;
       pieces.splice(pieces.indexOf(p), 1);
-      walls.push([r, c]);
+      innerGate(r, c, h, w, side, p.color, 0);
+    }
+    // Frozen exits inside the board: a straight run of frozen cells between walls. Pieces reach it
+    // from the side where pieces are.
+    const seen = new Set();
+    for (let i = 0; i < W * H; i++) {
+      if (cls[i] !== 'frozen' || seen.has(i)) continue;
+      const r = Math.floor(i / W), c = i % W;
+      let w = 1, h = 1;
+      while (c + w < W && cls[i + w] === 'frozen') w++;
+      if (w === 1) while (r + h < H && cls[i + h * W] === 'frozen') h++;
+      for (let y = r; y < r + h; y++) for (let x = c; x < c + w; x++) seen.add(y * W + x);
+      if (!ends(r, c, h, w).every(([y, x]) => wallAt(y, x))) continue;
+      const occupied = ([y, x]) => pieces.some(p => y >= p.r && y < p.r + p.h && x >= p.c && x < p.c + p.w);
+      const sides = (h === 1 ? ['T', 'B'] : ['L', 'R']).filter(sd => front(r, c, h, w, sd).every(([y, x]) => freeAt(y, x)));
+      const side = sides.length === 1 ? sides[0] : sides.find(sd => front(r, c, h, w, sd).some(occupied));
+      if (!side) continue;
+      const gt = innerGate(r, c, h, w, side, '?', 1);
+      const n = readNumber(img, rect.x + c * cw, rect.y + r * ch, rect.x + (c + w) * cw, rect.y + (r + h) * ch, 'g');
+      if (n) { gt.frozen = n; gt.read = true; }
+    }
+    // Empty pockets closed in by walls (e.g. between two inner exits) can't be reached: walls too.
+    {
+      const taken = new Set();
+      pieces.forEach(p => { for (let y = p.r; y < p.r + p.h; y++) for (let x = p.c; x < p.c + p.w; x++) taken.add(y * W + x); });
+      const done = new Set();
+      for (let i = 0; i < W * H; i++) {
+        if (done.has(i) || taken.has(i) || wallAt(Math.floor(i / W), i % W) || cls[i] !== 'empty') continue;
+        const comp = [i], q = [i]; done.add(i);
+        let closed = true;
+        while (q.length) {
+          const j = q.pop(), r = Math.floor(j / W), c = j % W;
+          for (const [dr, dc] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+            const y = r + dr, x = c + dc, k = y * W + x;
+            if (wallAt(y, x) || done.has(k)) continue;
+            if (taken.has(k) || cls[k] !== 'empty') { closed = false; continue; }
+            done.add(k); comp.push(k); q.push(k);
+          }
+        }
+        if (closed && comp.length <= 4) comp.forEach(k => walls.push([Math.floor(k / W), k % W]));
+      }
     }
 
     // Counters: frozen exits, crates and ice show their number.
     for (const gt of gates) {
-      if (!gt.frozen) continue;
+      if (!gt.frozen || gt.at != null) continue;
       const a0 = gt.start, a1 = gt.start + gt.len;
       const box = gt.side === 'L' ? [rect.x - 0.95 * cw, rect.y + a0 * ch, rect.x, rect.y + a1 * ch]
         : gt.side === 'R' ? [rect.x + rect.w, rect.y + a0 * ch, rect.x + rect.w + 0.95 * cw, rect.y + a1 * ch]

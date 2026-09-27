@@ -249,7 +249,7 @@ function render() {
       if (walls.has(r + ',' + c)) continue;
       const d = el('div', 'grid-bg', rectCss(r, c, 1, 1, cs, g, 1));
       const t = tracks.get(r + ',' + c);
-      if (t) { d.classList.add('track'); d.style.borderColor = COLORS[t]; }
+      if (t) { d.classList.add('track'); d.style.borderColor = COLORS[t]; if (t !== 'yellow') d.style.backgroundColor = COLORS[t] + '38'; }
       b.appendChild(d);
     }
 
