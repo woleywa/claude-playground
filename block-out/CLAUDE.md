@@ -74,8 +74,8 @@ Reference colours in `detect.js` were measured on Levels 198 and 204 (iPhone scr
 ## Testing
 
 - "Small demo" preset → ✓ Solved: 5 steps.
-- "Level 198" preset → 10 steps, then stuck waiting for 3 thawed exit colours.
-- "Level 204" preset → 5 wait moves, then stuck waiting for the thawed right exit's colour.
+- "Level 198" preset → 4 out, then no 5th exit found within the time limit (exits at 1 need one more piece out).
+- "Level 204" preset → 5 out in ~1 s, then the right exit thaws with an unknown colour.
 - Level 207 start screenshot (counters 4/7/7/7, crate 7) → 24 pieces, 5 exits; solve ≈ 20 s → 107 moves,
   6 out, then "take a new screenshot" (top-left exit thawed). With that exit set to purple: 75 moves, 8 out.
 - "Level 205" preset (top exit 10) → 10 pieces out, then the top exit thaws with an unknown colour.
